@@ -4,29 +4,43 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Calendar</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <p class="note" data-testid="dummy-calendar-note">
-      Dummy personal calendar — events are stored in <code>data/events.json</code>.
-    </p>
-    <section class="panel" data-testid="dummy-calendar">
-      <div class="toolbar">
-        <h1 id="month-label"></h1>
-        <form id="add-form" class="add-form">
-          <label>
-            Day
-            <input id="event-day" type="number" min="1" max="31" required />
-          </label>
-          <label>
-            Title
-            <input id="event-title" type="text" maxlength="80" required />
-          </label>
-          <button type="submit">Add</button>
-        </form>
+    <div class="app" data-testid="dummy-calendar">
+      <header class="topbar">
+        <button type="button" id="today-btn" class="today-btn">Today</button>
+        <h1 id="month-label" class="month-label"></h1>
+      </header>
+      <div class="workspace">
+        <aside class="sidebar">
+          <div class="mini-cal">
+            <div id="mini-month-label" class="mini-month-label"></div>
+            <div id="mini-grid" class="mini-grid"></div>
+          </div>
+          <form id="add-form" class="add-form">
+            <label>
+              Day
+              <input id="event-day" type="number" min="1" max="31" required />
+            </label>
+            <label>
+              Title
+              <input id="event-title" type="text" maxlength="80" required />
+            </label>
+            <button type="submit" class="add-btn">Add</button>
+          </form>
+          <p class="note" data-testid="dummy-calendar-note">
+            Dummy personal calendar — events are stored in <code>data/events.json</code>.
+          </p>
+        </aside>
+        <main class="main">
+          <div id="grid" class="calendar-grid"></div>
+        </main>
       </div>
-      <div id="grid" class="calendar-grid"></div>
-    </section>
+    </div>
     <script src="./app.js" type="module"></script>
   </body>
 </html>

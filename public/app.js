@@ -1,17 +1,24 @@
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const MINI_WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
 const monthLabel = document.getElementById("month-label");
+const miniMonthLabel = document.getElementById("mini-month-label");
+const miniGrid = document.getElementById("mini-grid");
 const grid = document.getElementById("grid");
 const form = document.getElementById("add-form");
 const dayInput = document.getElementById("event-day");
 const titleInput = document.getElementById("event-title");
+const todayBtn = document.getElementById("today-btn");
 
 const now = new Date();
 const year = now.getFullYear();
 const month = now.getMonth();
 const today = now.getDate();
+let selectedDay = today;
 
-monthLabel.textContent = now.toLocaleString("en-GB", { month: "long", year: "numeric" });
+const monthTitle = now.toLocaleString("en-GB", { month: "long", year: "numeric" });
+monthLabel.textContent = monthTitle;
+miniMonthLabel.textContent = monthTitle;
 
 function monthCells() {
   const first = new Date(year, month, 1);
@@ -43,6 +50,59 @@ async function saveEvents(events) {
   return (await res.json()).events;
 }
 
+function applySelection() {
+  for (const el of document.querySelectorAll("[data-day]")) {
+    el.classList.toggle("selected", Number(el.dataset.day) === selectedDay);
+  }
+}
+
+function selectDay(day, { pulse = false } = {}) {
+  selectedDay = day;
+  applySelection();
+  if (!pulse) {
+    return;
+  }
+  for (const el of document.querySelectorAll(".cell.today, .mini-day.today")) {
+    el.classList.remove("pulse");
+    void el.offsetWidth;
+    el.classList.add("pulse");
+  }
+  document.querySelector(".cell.today")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function renderMini() {
+  miniGrid.replaceChildren();
+  for (const label of MINI_WEEKDAYS) {
+    const el = document.createElement("div");
+    el.className = "mini-weekday";
+    el.textContent = label;
+    miniGrid.append(el);
+  }
+
+  for (const date of monthCells()) {
+    const inMonth = date.getMonth() === month;
+    const day = date.getDate();
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mini-day";
+    button.textContent = String(day);
+    if (!inMonth) {
+      button.classList.add("muted");
+      button.disabled = true;
+    } else {
+      button.dataset.day = String(day);
+      if (day === today) {
+        button.classList.add("today");
+      }
+      if (day === selectedDay) {
+        button.classList.add("selected");
+      }
+      button.addEventListener("click", () => selectDay(day));
+    }
+    miniGrid.append(button);
+  }
+}
+
 function render(events) {
   const byDay = new Map();
   for (const event of events) {
@@ -51,6 +111,7 @@ function render(events) {
     byDay.set(event.day, list);
   }
 
+  renderMini();
   grid.replaceChildren();
   for (const label of WEEKDAYS) {
     const el = document.createElement("div");
@@ -63,7 +124,18 @@ function render(events) {
     const inMonth = date.getMonth() === month;
     const day = date.getDate();
     const cell = document.createElement("div");
-    cell.className = `cell${inMonth ? "" : " muted"}${inMonth && day === today ? " today" : ""}`;
+    cell.className = "cell";
+    if (!inMonth) {
+      cell.classList.add("muted");
+    } else {
+      cell.dataset.day = String(day);
+      if (day === today) {
+        cell.classList.add("today");
+      }
+      if (day === selectedDay) {
+        cell.classList.add("selected");
+      }
+    }
     const dayEl = document.createElement("span");
     dayEl.className = "day";
     dayEl.textContent = String(day);
@@ -85,6 +157,10 @@ function render(events) {
     grid.append(cell);
   }
 }
+
+todayBtn.addEventListener("click", () => {
+  selectDay(today, { pulse: true });
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
