@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Calendar</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <p class="note" data-testid="dummy-calendar-note">
+      Dummy personal calendar — events are stored in <code>data/events.json</code>.
+    </p>
+    <section class="panel" data-testid="dummy-calendar">
+      <div class="toolbar">
+        <h1 id="month-label"></h1>
+        <form id="add-form" class="add-form">
+          <label>
+            Day
+            <input id="event-day" type="number" min="1" max="31" required />
+          </label>
+          <label>
+            Title
+            <input id="event-title" type="text" maxlength="80" required />
+          </label>
+          <button type="submit">Add</button>
+        </form>
+      </div>
+      <div id="grid" class="calendar-grid"></div>
+    </section>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
