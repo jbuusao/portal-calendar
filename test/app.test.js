@@ -8,16 +8,25 @@ import { createApp } from "../src/app.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const examplePath = path.join(root, "data", "events.example.json");
+const configExamplePath = path.join(root, "data", "config.example.json");
 const publicDir = path.join(root, "public");
 
-describe("calendar app", () => {
+function asUser(id, init = {}) {
+  const headers = { "X-Test-User": id, ...(init.headers ?? {}) };
+  if (init.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  return { ...init, headers };
+}
+
+describe("calendar app", { concurrency: false }, () => {
   let dataDir;
   let server;
   let base;
 
   before(async () => {
     dataDir = await mkdtemp(path.join(os.tmpdir(), "calendar-"));
-    const app = createApp({ dataDir, examplePath, publicDir });
+    const app = createApp({ dataDir, examplePath, configExamplePath, publicDir });
     server = app.listen(0, "127.0.0.1");
     await new Promise((resolve) => server.once("listening", resolve));
     const { port } = server.address();
@@ -37,34 +46,169 @@ describe("calendar app", () => {
     assert.deepEqual(await res.json(), { ok: true });
   });
 
-  it("seeds events.json from the example file on first read", async () => {
-    const res = await fetch(`${base}/api/events`);
+  it("lists test users without a session", async () => {
+    const res = await fetch(`${base}/api/users`);
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.equal(body.events.length, 3);
-    assert.equal(body.events[0].title, "Standup");
+    assert.equal(body.users.length, 3);
+    assert.equal(body.users[0].id, "alice");
+  });
+
+  it("rejects unknown or missing test users", async () => {
+    const missing = await fetch(`${base}/api/events`);
+    assert.equal(missing.status, 401);
+    const unknown = await fetch(`${base}/api/events`, asUser("not-a-user"));
+    assert.equal(unknown.status, 401);
+  });
+
+  it("seeds events.json from the example file on first read", async () => {
+    const res = await fetch(`${base}/api/events`, asUser("alice"));
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.events.length, 1);
+    assert.equal(body.events[0].title, "Tennis match");
     const stored = JSON.parse(await readFile(path.join(dataDir, "events.json"), "utf8"));
-    assert.equal(stored[1].title, "Sprint 02 planning");
+    assert.equal(stored[0].inviteeIds[0], "bob");
+    assert.equal(stored[0].invites[0].userId, "bob");
   });
 
-  it("persists a PUT to events.json", async () => {
-    const events = [{ id: "n1", day: 12, title: "Dentist" }];
-    const put = await fetch(`${base}/api/events`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ events }),
-    });
-    assert.equal(put.status, 200);
-    const get = await fetch(`${base}/api/events`);
-    assert.deepEqual(await get.json(), { events });
+  it("creates an event and simulates invitations", async () => {
+    const created = await fetch(
+      `${base}/api/events`,
+      asUser("alice", {
+        method: "POST",
+        body: JSON.stringify({ title: "Evening match", inviteeIds: ["bob"] }),
+      }),
+    );
+    assert.equal(created.status, 201);
+    const { event } = await created.json();
+    assert.equal(event.createdBy, "alice");
+    assert.deepEqual(event.inviteeIds, ["bob"]);
+    assert.equal(event.invites.length, 1);
+    assert.equal(event.invites[0].userId, "bob");
+    assert.ok(event.invites[0].at);
+
+    const asBob = await fetch(`${base}/api/events`, asUser("bob"));
+    const bobBody = await asBob.json();
+    assert.ok(bobBody.events.some((item) => item.id === event.id));
+
+    const asCara = await fetch(`${base}/api/events`, asUser("cara"));
+    const caraBody = await asCara.json();
+    assert.equal(
+      caraBody.events.some((item) => item.id === event.id),
+      false,
+    );
+
+    const forbidden = await fetch(`${base}/api/events/${event.id}`, asUser("cara"));
+    assert.equal(forbidden.status, 403);
   });
 
-  it("rejects invalid events", async () => {
-    const res = await fetch(`${base}/api/events`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ events: [{ day: 99, title: "Nope" }] }),
-    });
+  it("lets participants suggest slots and toggle votes", async () => {
+    const created = await fetch(
+      `${base}/api/events`,
+      asUser("alice", {
+        method: "POST",
+        body: JSON.stringify({ title: "Vote test", inviteeIds: ["bob", "cara"] }),
+      }),
+    );
+    const { event } = await created.json();
+
+    const slotRes = await fetch(
+      `${base}/api/events/${event.id}/slots`,
+      asUser("bob", {
+        method: "POST",
+        body: JSON.stringify({ date: "2026-08-20", start: "18:00" }),
+      }),
+    );
+    assert.equal(slotRes.status, 201);
+    const withSlot = await slotRes.json();
+    const slotId = withSlot.event.slots[0].id;
+
+    const vote = await fetch(`${base}/api/events/${event.id}/slots/${slotId}/vote`, asUser("cara", { method: "POST" }));
+    assert.equal(vote.status, 200);
+    const voted = await vote.json();
+    assert.equal(voted.event.votes.length, 1);
+    assert.equal(voted.event.votes[0].userId, "cara");
+
+    const again = await fetch(`${base}/api/events/${event.id}/slots/${slotId}/vote`, asUser("cara", { method: "POST" }));
+    const toggled = await again.json();
+    assert.equal(toggled.event.votes.length, 0);
+  });
+
+  it("forbids a non-invitee from voting", async () => {
+    const created = await fetch(
+      `${base}/api/events`,
+      asUser("alice", {
+        method: "POST",
+        body: JSON.stringify({ title: "Private", inviteeIds: ["bob"] }),
+      }),
+    );
+    const { event } = await created.json();
+    const slotRes = await fetch(
+      `${base}/api/events/${event.id}/slots`,
+      asUser("alice", {
+        method: "POST",
+        body: JSON.stringify({ date: "2026-08-21", start: "19:00" }),
+      }),
+    );
+    const slotId = (await slotRes.json()).event.slots[0].id;
+    const vote = await fetch(`${base}/api/events/${event.id}/slots/${slotId}/vote`, asUser("cara", { method: "POST" }));
+    assert.equal(vote.status, 403);
+  });
+
+  it("lets the creator lock a slot and then rejects further votes", async () => {
+    const created = await fetch(
+      `${base}/api/events`,
+      asUser("alice", {
+        method: "POST",
+        body: JSON.stringify({ title: "Lock test", inviteeIds: ["bob"] }),
+      }),
+    );
+    const { event } = await created.json();
+    const slotRes = await fetch(
+      `${base}/api/events/${event.id}/slots`,
+      asUser("bob", {
+        method: "POST",
+        body: JSON.stringify({ date: "2026-08-22", start: "17:00" }),
+      }),
+    );
+    const slotId = (await slotRes.json()).event.slots[0].id;
+
+    const asBobLock = await fetch(
+      `${base}/api/events/${event.id}/lock`,
+      asUser("bob", { method: "POST", body: JSON.stringify({ slotId }) }),
+    );
+    assert.equal(asBobLock.status, 403);
+
+    const lock = await fetch(
+      `${base}/api/events/${event.id}/lock`,
+      asUser("alice", { method: "POST", body: JSON.stringify({ slotId }) }),
+    );
+    assert.equal(lock.status, 200);
+    const locked = await lock.json();
+    assert.equal(locked.event.status, "final");
+    assert.equal(locked.event.finalSlotId, slotId);
+
+    const vote = await fetch(`${base}/api/events/${event.id}/slots/${slotId}/vote`, asUser("bob", { method: "POST" }));
+    assert.equal(vote.status, 409);
+  });
+
+  it("rejects an invalid slot hour", async () => {
+    const created = await fetch(
+      `${base}/api/events`,
+      asUser("alice", {
+        method: "POST",
+        body: JSON.stringify({ title: "Bad hour", inviteeIds: ["bob"] }),
+      }),
+    );
+    const { event } = await created.json();
+    const res = await fetch(
+      `${base}/api/events/${event.id}/slots`,
+      asUser("alice", {
+        method: "POST",
+        body: JSON.stringify({ date: "2026-08-20", start: "18:30" }),
+      }),
+    );
     assert.equal(res.status, 400);
   });
 });

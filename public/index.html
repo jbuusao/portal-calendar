@@ -12,28 +12,53 @@
   <body>
     <div class="app" data-testid="dummy-calendar">
       <header class="topbar">
-        <button type="button" id="today-btn" class="today-btn">Today</button>
-        <h1 id="month-label" class="month-label"></h1>
+        <div id="calendar-nav" class="calendar-nav hidden">
+          <button type="button" id="back-btn" class="today-btn">Back</button>
+          <button type="button" id="today-btn" class="today-btn">Today</button>
+          <button type="button" id="prev-month" class="icon-btn" aria-label="Previous month">‹</button>
+          <button type="button" id="next-month" class="icon-btn" aria-label="Next month">›</button>
+          <h1 id="month-label" class="month-label"></h1>
+          <span id="event-title-label" class="event-title-label"></span>
+        </div>
+        <h1 id="list-heading" class="month-label">Events</h1>
+        <label class="user-switcher">
+          Acting as
+          <select id="user-select"></select>
+        </label>
       </header>
-      <div class="workspace">
+      <p id="error-banner" class="error-banner hidden"></p>
+      <div id="view-list" class="list-view">
+        <form id="create-form" class="create-form">
+          <label>
+            Event title
+            <input id="event-title" type="text" maxlength="80" required placeholder="Tennis match" />
+          </label>
+          <fieldset class="invitees">
+            <legend>Invite participants (simulated)</legend>
+            <div id="invitee-options" class="invitee-options"></div>
+          </fieldset>
+          <button type="submit" class="add-btn">Create event</button>
+        </form>
+        <ul id="event-list" class="event-list"></ul>
+      </div>
+      <div id="view-calendar" class="workspace hidden">
         <aside class="sidebar">
           <div class="mini-cal">
             <div id="mini-month-label" class="mini-month-label"></div>
             <div id="mini-grid" class="mini-grid"></div>
           </div>
-          <form id="add-form" class="add-form">
+          <div id="people" class="people"></div>
+          <form id="suggest-form" class="add-form">
+            <p id="selected-date-label" class="selected-date-label"></p>
             <label>
-              Day
-              <input id="event-day" type="number" min="1" max="31" required />
+              Hour
+              <select id="slot-hour"></select>
             </label>
-            <label>
-              Title
-              <input id="event-title" type="text" maxlength="80" required />
-            </label>
-            <button type="submit" class="add-btn">Add</button>
+            <button type="submit" class="add-btn">Suggest slot</button>
           </form>
+          <button type="button" id="lock-btn" class="lock-btn hidden">Lock this slot</button>
           <p class="note" data-testid="dummy-calendar-note">
-            Dummy personal calendar — events are stored in <code>data/events.json</code>.
+            Test users and simulated invitations. Events are stored in <code>data/events.json</code>.
           </p>
         </aside>
         <main class="main">

@@ -10,6 +10,7 @@ const dataDir = process.env.CALENDAR_DATA_DIR || path.join(root, "data");
 const app = createApp({
   dataDir,
   examplePath: path.join(root, "data", "events.example.json"),
+  configExamplePath: path.join(root, "data", "config.example.json"),
   publicDir: path.join(root, "public"),
 });
 

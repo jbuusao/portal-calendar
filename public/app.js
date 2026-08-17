@@ -1,26 +1,69 @@
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MINI_WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
+const HOURS = Array.from({ length: 17 }, (_, i) => `${String(i + 6).padStart(2, "0")}:00`);
+const USER_KEY = "calendar-test-user";
 
+const userSelect = document.getElementById("user-select");
+const listHeading = document.getElementById("list-heading");
+const calendarNav = document.getElementById("calendar-nav");
+const viewList = document.getElementById("view-list");
+const viewCalendar = document.getElementById("view-calendar");
+const eventList = document.getElementById("event-list");
+const createForm = document.getElementById("create-form");
+const titleInput = document.getElementById("event-title");
+const inviteeOptions = document.getElementById("invitee-options");
 const monthLabel = document.getElementById("month-label");
+const eventTitleLabel = document.getElementById("event-title-label");
 const miniMonthLabel = document.getElementById("mini-month-label");
 const miniGrid = document.getElementById("mini-grid");
 const grid = document.getElementById("grid");
-const form = document.getElementById("add-form");
-const dayInput = document.getElementById("event-day");
-const titleInput = document.getElementById("event-title");
+const people = document.getElementById("people");
+const suggestForm = document.getElementById("suggest-form");
+const selectedDateLabel = document.getElementById("selected-date-label");
+const slotHour = document.getElementById("slot-hour");
+const lockBtn = document.getElementById("lock-btn");
 const todayBtn = document.getElementById("today-btn");
+const backBtn = document.getElementById("back-btn");
+const prevMonthBtn = document.getElementById("prev-month");
+const nextMonthBtn = document.getElementById("next-month");
+const errorBanner = document.getElementById("error-banner");
 
 const now = new Date();
-const year = now.getFullYear();
-const month = now.getMonth();
-const today = now.getDate();
-let selectedDay = today;
+let users = [];
+let currentUserId = localStorage.getItem(USER_KEY) || "";
+let currentEvent = null;
+let selectedSlotId = null;
+let viewYear = now.getFullYear();
+let viewMonth = now.getMonth();
+let selectedDate = toIsoDate(now);
 
-const monthTitle = now.toLocaleString("en-GB", { month: "long", year: "numeric" });
-monthLabel.textContent = monthTitle;
-miniMonthLabel.textContent = monthTitle;
+for (const hour of HOURS) {
+  const option = document.createElement("option");
+  option.value = hour;
+  option.textContent = hour;
+  if (hour === "18:00") {
+    option.selected = true;
+  }
+  slotHour.append(option);
+}
 
-function monthCells() {
+function toIsoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseIsoDate(value) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function monthTitle(year, month) {
+  return new Date(year, month, 1).toLocaleString("en-GB", { month: "long", year: "numeric" });
+}
+
+function monthCells(year, month) {
   const first = new Date(year, month, 1);
   const mondayOffset = (first.getDay() + 6) % 7;
   const start = new Date(year, month, 1 - mondayOffset);
@@ -31,34 +74,281 @@ function monthCells() {
   });
 }
 
-async function loadEvents() {
-  const res = await fetch("./api/events");
-  const data = await res.json();
-  return data.events ?? [];
+function showError(message) {
+  errorBanner.textContent = message;
+  errorBanner.classList.toggle("hidden", !message);
 }
 
-async function saveEvents(events) {
-  const res = await fetch("./api/events", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ events }),
-  });
+function participantIds(event) {
+  return [...new Set([event.createdBy, ...event.inviteeIds])];
+}
+
+function userName(id) {
+  return users.find((user) => user.id === id)?.name ?? id;
+}
+
+async function api(path, opts = {}) {
+  const headers = { ...(opts.headers ?? {}) };
+  if (currentUserId) {
+    headers["X-Test-User"] = currentUserId;
+  }
+  if (opts.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  const res = await fetch(path, { ...opts, headers });
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || "Could not save events");
+    throw new Error(data.error || `Request failed (${res.status})`);
   }
-  return (await res.json()).events;
+  return data;
 }
 
-function applySelection() {
-  for (const el of document.querySelectorAll("[data-day]")) {
-    el.classList.toggle("selected", Number(el.dataset.day) === selectedDay);
+function showList() {
+  currentEvent = null;
+  selectedSlotId = null;
+  listHeading.classList.remove("hidden");
+  calendarNav.classList.add("hidden");
+  viewList.classList.remove("hidden");
+  viewCalendar.classList.add("hidden");
+}
+
+function showCalendar() {
+  listHeading.classList.add("hidden");
+  calendarNav.classList.remove("hidden");
+  viewList.classList.add("hidden");
+  viewCalendar.classList.remove("hidden");
+}
+
+function renderInviteeOptions() {
+  inviteeOptions.replaceChildren();
+  for (const user of users) {
+    if (user.id === currentUserId) {
+      continue;
+    }
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.name = "invitee";
+    input.value = user.id;
+    label.append(input, ` ${user.name}`);
+    inviteeOptions.append(label);
   }
 }
 
-function selectDay(day, { pulse = false } = {}) {
-  selectedDay = day;
-  applySelection();
+function renderUserSelect() {
+  userSelect.replaceChildren();
+  for (const user of users) {
+    const option = document.createElement("option");
+    option.value = user.id;
+    option.textContent = user.name;
+    userSelect.append(option);
+  }
+  if (!users.some((user) => user.id === currentUserId)) {
+    currentUserId = users[0]?.id ?? "";
+    localStorage.setItem(USER_KEY, currentUserId);
+  }
+  userSelect.value = currentUserId;
+}
+
+function renderEventList(events) {
+  eventList.replaceChildren();
+  if (!events.length) {
+    const empty = document.createElement("li");
+    empty.textContent = "No events yet. Create one and invite participants.";
+    eventList.append(empty);
+    return;
+  }
+  for (const event of events) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    const count = participantIds(event).length;
+    const status = event.status === "final" ? "Final" : "Open";
+    const strong = document.createElement("strong");
+    strong.textContent = event.title;
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = `${status} · ${count} participants`;
+    button.append(strong, meta);
+    button.addEventListener("click", () => openEvent(event.id));
+    item.append(button);
+    eventList.append(item);
+  }
+}
+
+function renderPeople() {
+  const ids = participantIds(currentEvent);
+  people.replaceChildren();
+  const heading = document.createElement("h2");
+  heading.textContent = "Participants";
+  const list = document.createElement("ul");
+  for (const id of ids) {
+    const item = document.createElement("li");
+    item.textContent = `${userName(id)}${id === currentEvent.createdBy ? " (creator)" : ""}`;
+    list.append(item);
+  }
+  const invited = currentEvent.invites.map((invite) => userName(invite.userId)).join(", ") || "none";
+  const simulated = document.createElement("p");
+  simulated.className = "sim-invites";
+  simulated.textContent = `Invitations (simulated): ${invited}`;
+  people.append(heading, list, simulated);
+}
+
+function renderMini() {
+  miniMonthLabel.textContent = monthTitle(viewYear, viewMonth);
+  miniGrid.replaceChildren();
+  for (const label of MINI_WEEKDAYS) {
+    const el = document.createElement("div");
+    el.className = "mini-weekday";
+    el.textContent = label;
+    miniGrid.append(el);
+  }
+  const todayIso = toIsoDate(now);
+  for (const date of monthCells(viewYear, viewMonth)) {
+    const iso = toIsoDate(date);
+    const inMonth = date.getMonth() === viewMonth;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mini-day";
+    button.textContent = String(date.getDate());
+    button.dataset.date = iso;
+    if (!inMonth) {
+      button.classList.add("muted");
+    }
+    if (iso === todayIso) {
+      button.classList.add("today");
+    }
+    if (iso === selectedDate) {
+      button.classList.add("selected");
+    }
+    button.addEventListener("click", () => selectDate(iso, { goToMonth: true }));
+    miniGrid.append(button);
+  }
+}
+
+function voteCount(slotId) {
+  return currentEvent.votes.filter((vote) => vote.slotId === slotId).length;
+}
+
+function renderGrid() {
+  const byDate = new Map();
+  for (const slot of currentEvent.slots) {
+    const list = byDate.get(slot.date) ?? [];
+    list.push(slot);
+    byDate.set(slot.date, list);
+  }
+  const total = participantIds(currentEvent).length;
+  const todayIso = toIsoDate(now);
+  grid.replaceChildren();
+  for (const label of WEEKDAYS) {
+    const el = document.createElement("div");
+    el.className = "weekday";
+    el.textContent = label;
+    grid.append(el);
+  }
+  for (const date of monthCells(viewYear, viewMonth)) {
+    const iso = toIsoDate(date);
+    const inMonth = date.getMonth() === viewMonth;
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    cell.dataset.date = iso;
+    if (!inMonth) {
+      cell.classList.add("muted");
+    }
+    if (iso === todayIso) {
+      cell.classList.add("today");
+    }
+    if (iso === selectedDate) {
+      cell.classList.add("selected");
+    }
+    const dayEl = document.createElement("span");
+    dayEl.className = "day";
+    dayEl.textContent = String(date.getDate());
+    cell.append(dayEl);
+    const slots = (byDate.get(iso) ?? []).slice().sort((a, b) => a.start.localeCompare(b.start));
+    for (const slot of slots) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "event";
+      const count = voteCount(slot.id);
+      button.textContent = `${slot.start} · ${count}/${total}`;
+      if (currentEvent.votes.some((vote) => vote.slotId === slot.id && vote.userId === currentUserId)) {
+        button.classList.add("mine");
+      }
+      if (currentEvent.status === "final") {
+        if (slot.id === currentEvent.finalSlotId) {
+          button.classList.add("final-slot");
+        } else {
+          button.classList.add("dimmed");
+        }
+      }
+      if (slot.id === selectedSlotId) {
+        button.classList.add("selected-slot");
+      }
+      button.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        selectedSlotId = slot.id;
+        selectDate(iso);
+        if (currentEvent.status === "open") {
+          try {
+            showError("");
+            const data = await api(`./api/events/${currentEvent.id}/slots/${slot.id}/vote`, { method: "POST" });
+            currentEvent = data.event;
+          } catch (err) {
+            showError(err.message);
+          }
+        }
+        renderCalendar();
+      });
+      cell.append(button);
+    }
+    cell.addEventListener("click", () => selectDate(iso, { goToMonth: !inMonth }));
+    grid.append(cell);
+  }
+}
+
+function updateLockButton() {
+  const canLock =
+    currentEvent &&
+    currentEvent.status === "open" &&
+    currentEvent.createdBy === currentUserId &&
+    selectedSlotId &&
+    currentEvent.slots.some((slot) => slot.id === selectedSlotId);
+  lockBtn.classList.toggle("hidden", !canLock);
+}
+
+function renderCalendar() {
+  monthLabel.textContent = monthTitle(viewYear, viewMonth);
+  eventTitleLabel.textContent = currentEvent.title;
+  selectedDateLabel.textContent = parseIsoDate(selectedDate).toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+  suggestForm.classList.toggle("hidden", currentEvent.status !== "open");
+  renderPeople();
+  renderMini();
+  renderGrid();
+  updateLockButton();
+}
+
+function selectDate(iso, { goToMonth = false } = {}) {
+  selectedDate = iso;
+  if (goToMonth) {
+    const date = parseIsoDate(iso);
+    viewYear = date.getFullYear();
+    viewMonth = date.getMonth();
+  }
+  if (currentEvent) {
+    renderCalendar();
+  }
+}
+
+function goToToday({ pulse = false } = {}) {
+  viewYear = now.getFullYear();
+  viewMonth = now.getMonth();
+  selectedDate = toIsoDate(now);
+  renderCalendar();
   if (!pulse) {
     return;
   }
@@ -70,111 +360,117 @@ function selectDay(day, { pulse = false } = {}) {
   document.querySelector(".cell.today")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
-function renderMini() {
-  miniGrid.replaceChildren();
-  for (const label of MINI_WEEKDAYS) {
-    const el = document.createElement("div");
-    el.className = "mini-weekday";
-    el.textContent = label;
-    miniGrid.append(el);
-  }
-
-  for (const date of monthCells()) {
-    const inMonth = date.getMonth() === month;
-    const day = date.getDate();
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "mini-day";
-    button.textContent = String(day);
-    if (!inMonth) {
-      button.classList.add("muted");
-      button.disabled = true;
-    } else {
-      button.dataset.day = String(day);
-      if (day === today) {
-        button.classList.add("today");
-      }
-      if (day === selectedDay) {
-        button.classList.add("selected");
-      }
-      button.addEventListener("click", () => selectDay(day));
-    }
-    miniGrid.append(button);
-  }
+async function loadList() {
+  showList();
+  renderInviteeOptions();
+  const data = await api("./api/events");
+  renderEventList(data.events ?? []);
 }
 
-function render(events) {
-  const byDay = new Map();
-  for (const event of events) {
-    const list = byDay.get(event.day) ?? [];
-    list.push(event);
-    byDay.set(event.day, list);
+async function openEvent(id) {
+  const data = await api(`./api/events/${id}`);
+  currentEvent = data.event;
+  selectedSlotId = currentEvent.finalSlotId;
+  const firstSlot = currentEvent.slots[0];
+  if (firstSlot) {
+    selectedDate = firstSlot.date;
+    const date = parseIsoDate(firstSlot.date);
+    viewYear = date.getFullYear();
+    viewMonth = date.getMonth();
+  } else {
+    goToToday();
   }
-
-  renderMini();
-  grid.replaceChildren();
-  for (const label of WEEKDAYS) {
-    const el = document.createElement("div");
-    el.className = "weekday";
-    el.textContent = label;
-    grid.append(el);
-  }
-
-  for (const date of monthCells()) {
-    const inMonth = date.getMonth() === month;
-    const day = date.getDate();
-    const cell = document.createElement("div");
-    cell.className = "cell";
-    if (!inMonth) {
-      cell.classList.add("muted");
-    } else {
-      cell.dataset.day = String(day);
-      if (day === today) {
-        cell.classList.add("today");
-      }
-      if (day === selectedDay) {
-        cell.classList.add("selected");
-      }
-    }
-    const dayEl = document.createElement("span");
-    dayEl.className = "day";
-    dayEl.textContent = String(day);
-    cell.append(dayEl);
-    if (inMonth) {
-      for (const event of byDay.get(day) ?? []) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "event";
-        button.textContent = event.title;
-        button.title = "Remove event";
-        button.addEventListener("click", async () => {
-          const next = events.filter((item) => item.id !== event.id);
-          render(await saveEvents(next));
-        });
-        cell.append(button);
-      }
-    }
-    grid.append(cell);
-  }
+  showCalendar();
+  renderCalendar();
 }
 
-todayBtn.addEventListener("click", () => {
-  selectDay(today, { pulse: true });
+userSelect.addEventListener("change", async () => {
+  currentUserId = userSelect.value;
+  localStorage.setItem(USER_KEY, currentUserId);
+  showError("");
+  renderInviteeOptions();
+  await loadList();
 });
 
-form.addEventListener("submit", async (event) => {
+createForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const current = await loadEvents();
-  const next = [
-    ...current,
-    {
-      id: `evt-${Date.now()}`,
-      day: Number(dayInput.value),
-      title: titleInput.value.trim(),
-    },
-  ];
-  render(await saveEvents(next));
-  titleInput.value = "";
+  const inviteeIds = [...inviteeOptions.querySelectorAll("input:checked")].map((input) => input.value);
+  try {
+    showError("");
+    await api("./api/events", {
+      method: "POST",
+      body: JSON.stringify({ title: titleInput.value.trim(), inviteeIds }),
+    });
+    titleInput.value = "";
+    for (const input of inviteeOptions.querySelectorAll("input")) {
+      input.checked = false;
+    }
+    await loadList();
+  } catch (err) {
+    showError(err.message);
+  }
 });
 
-render(await loadEvents());
+suggestForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    showError("");
+    const data = await api(`./api/events/${currentEvent.id}/slots`, {
+      method: "POST",
+      body: JSON.stringify({ date: selectedDate, start: slotHour.value }),
+    });
+    currentEvent = data.event;
+    selectedSlotId = currentEvent.slots.at(-1)?.id ?? selectedSlotId;
+    renderCalendar();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+lockBtn.addEventListener("click", async () => {
+  try {
+    showError("");
+    const data = await api(`./api/events/${currentEvent.id}/lock`, {
+      method: "POST",
+      body: JSON.stringify({ slotId: selectedSlotId }),
+    });
+    currentEvent = data.event;
+    renderCalendar();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+todayBtn.addEventListener("click", () => goToToday({ pulse: true }));
+backBtn.addEventListener("click", () => {
+  showError("");
+  loadList().catch((err) => showError(err.message));
+});
+prevMonthBtn.addEventListener("click", () => {
+  viewMonth -= 1;
+  if (viewMonth < 0) {
+    viewMonth = 11;
+    viewYear -= 1;
+  }
+  selectedDate = toIsoDate(new Date(viewYear, viewMonth, 1));
+  renderCalendar();
+});
+nextMonthBtn.addEventListener("click", () => {
+  viewMonth += 1;
+  if (viewMonth > 11) {
+    viewMonth = 0;
+    viewYear += 1;
+  }
+  selectedDate = toIsoDate(new Date(viewYear, viewMonth, 1));
+  renderCalendar();
+});
+
+try {
+  const data = await api("./api/users");
+  users = data.users ?? [];
+  renderUserSelect();
+  renderInviteeOptions();
+  await loadList();
+} catch (err) {
+  showError(err.message);
+}
