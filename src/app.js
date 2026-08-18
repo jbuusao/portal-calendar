@@ -2,15 +2,18 @@ import path from "node:path";
 import express from "express";
 import { publicUser, requireUser, usersFromConfig } from "./auth.js";
 import { createContext } from "./context.js";
+import { openDatabase } from "./db.js";
 import {
   addSlot,
   createEvent,
   eventsForUser,
+  initializeEventsStore,
   isParticipant,
+  loadEvent,
+  loadEvents,
   lockSlot,
-  readEvents,
+  saveEvent,
   toggleVote,
-  writeEvents,
 } from "./events.js";
 
 function httpError(err, fallback = 400) {
@@ -37,11 +40,14 @@ export function createApp({
     });
   const directoryIds = () =>
     ctx.embedded ? null : new Set(usersFromConfig(ctx.config()).map((user) => user.id));
-  const loadEvents = () => readEvents(dataDir, examplePath, directoryIds());
-  const save = (events) => {
-    writeEvents(dataDir, events);
-    return events;
-  };
+  const db = openDatabase(dataDir);
+  initializeEventsStore(db, {
+    dataDir,
+    examplePath,
+    knownUserIds: directoryIds(),
+    seedExample: ctx.standalone,
+  });
+  app.locals.db = db;
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true });
@@ -77,7 +83,7 @@ export function createApp({
       return;
     }
     try {
-      res.json({ events: eventsForUser(loadEvents(), user.id) });
+      res.json({ events: eventsForUser(loadEvents(db), user.id) });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : "invalid events" });
     }
@@ -89,15 +95,13 @@ export function createApp({
       return;
     }
     try {
-      const events = loadEvents();
       const event = createEvent({
         title: req.body?.title,
         createdBy: user.id,
         inviteeIds: req.body?.inviteeIds,
         knownUserIds: directoryIds(),
       });
-      events.push(event);
-      save(events);
+      saveEvent(db, event);
       res.status(201).json({ event });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : "invalid event" });
@@ -110,7 +114,7 @@ export function createApp({
       return;
     }
     try {
-      const event = loadEvents().find((item) => item.id === req.params.id);
+      const event = loadEvent(db, req.params.id);
       if (!event) {
         res.status(404).json({ error: "event not found" });
         return;
@@ -131,8 +135,7 @@ export function createApp({
       return;
     }
     try {
-      const events = loadEvents();
-      const event = events.find((item) => item.id === req.params.id);
+      const event = loadEvent(db, req.params.id);
       if (!event) {
         res.status(404).json({ error: "event not found" });
         return;
@@ -142,7 +145,7 @@ export function createApp({
         return;
       }
       addSlot(event, { date: req.body?.date, start: req.body?.start, suggestedBy: user.id });
-      save(events);
+      saveEvent(db, event);
       res.status(201).json({ event });
     } catch (err) {
       res.status(httpError(err)).json({ error: err instanceof Error ? err.message : "invalid slot" });
@@ -155,8 +158,7 @@ export function createApp({
       return;
     }
     try {
-      const events = loadEvents();
-      const event = events.find((item) => item.id === req.params.id);
+      const event = loadEvent(db, req.params.id);
       if (!event) {
         res.status(404).json({ error: "event not found" });
         return;
@@ -166,7 +168,7 @@ export function createApp({
         return;
       }
       toggleVote(event, { slotId: req.params.slotId, userId: user.id });
-      save(events);
+      saveEvent(db, event);
       res.json({ event });
     } catch (err) {
       res.status(httpError(err)).json({ error: err instanceof Error ? err.message : "invalid vote" });
@@ -179,8 +181,7 @@ export function createApp({
       return;
     }
     try {
-      const events = loadEvents();
-      const event = events.find((item) => item.id === req.params.id);
+      const event = loadEvent(db, req.params.id);
       if (!event) {
         res.status(404).json({ error: "event not found" });
         return;
@@ -190,7 +191,7 @@ export function createApp({
         return;
       }
       lockSlot(event, { slotId: req.body?.slotId, userId: user.id });
-      save(events);
+      saveEvent(db, event);
       res.json({ event });
     } catch (err) {
       res.status(httpError(err)).json({ error: err instanceof Error ? err.message : "could not lock" });

@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,14 +21,22 @@ function asUser(id, init = {}) {
   return { ...init, headers };
 }
 
+async function closeServer(server, app) {
+  await new Promise((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
+  app?.locals?.db?.close();
+}
+
 describe("calendar app", { concurrency: false }, () => {
   let dataDir;
   let server;
+  let app;
   let base;
 
   before(async () => {
     dataDir = await mkdtemp(path.join(os.tmpdir(), "calendar-"));
-    const app = createApp({ dataDir, examplePath, configExamplePath, publicDir });
+    app = createApp({ dataDir, examplePath, configExamplePath, publicDir });
     server = app.listen(0, "127.0.0.1");
     await new Promise((resolve) => server.once("listening", resolve));
     const { port } = server.address();
@@ -35,9 +44,7 @@ describe("calendar app", { concurrency: false }, () => {
   });
 
   after(async () => {
-    await new Promise((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
-    });
+    await closeServer(server, app);
     await rm(dataDir, { recursive: true, force: true });
   });
 
@@ -62,15 +69,15 @@ describe("calendar app", { concurrency: false }, () => {
     assert.equal(unknown.status, 401);
   });
 
-  it("seeds events.json from the example file on first read", async () => {
+  it("seeds sqlite from the example file when the database is empty", async () => {
     const res = await fetch(`${base}/api/events`, asUser("alice"));
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.events.length, 1);
     assert.equal(body.events[0].title, "Tennis match");
-    const stored = JSON.parse(await readFile(path.join(dataDir, "events.json"), "utf8"));
-    assert.equal(stored[0].inviteeIds[0], "bob");
-    assert.equal(stored[0].invites[0].userId, "bob");
+    assert.equal(body.events[0].inviteeIds[0], "bob");
+    assert.equal(body.events[0].invites[0].userId, "bob");
+    assert.equal(existsSync(path.join(dataDir, "calendar.sqlite")), true);
   });
 
   it("creates an event and simulates invitations", async () => {
@@ -237,6 +244,7 @@ describe("calendar app", { concurrency: false }, () => {
 describe("legacy dummy events.json", { concurrency: false }, () => {
   let dataDir;
   let server;
+  let app;
   let base;
 
   before(async () => {
@@ -245,7 +253,7 @@ describe("legacy dummy events.json", { concurrency: false }, () => {
       path.join(dataDir, "events.json"),
       `${JSON.stringify([{ id: "evt-old", day: 4, title: "Tennis" }], null, 2)}\n`,
     );
-    const app = createApp({ dataDir, examplePath, configExamplePath, publicDir });
+    app = createApp({ dataDir, examplePath, configExamplePath, publicDir });
     server = app.listen(0, "127.0.0.1");
     await new Promise((resolve) => server.once("listening", resolve));
     const { port } = server.address();
@@ -253,13 +261,11 @@ describe("legacy dummy events.json", { concurrency: false }, () => {
   });
 
   after(async () => {
-    await new Promise((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
-    });
+    await closeServer(server, app);
     await rm(dataDir, { recursive: true, force: true });
   });
 
-  it("reseeds from the example file when createdBy is missing", async () => {
+  it("seeds from the example file when events.json has no createdBy", async () => {
     const res = await fetch(`${base}/api/events`, asUser("alice"));
     assert.equal(res.status, 200);
     const body = await res.json();
@@ -269,9 +275,60 @@ describe("legacy dummy events.json", { concurrency: false }, () => {
   });
 });
 
+describe("events.json import into sqlite", { concurrency: false }, () => {
+  let dataDir;
+  let server;
+  let app;
+  let base;
+
+  before(async () => {
+    dataDir = await mkdtemp(path.join(os.tmpdir(), "calendar-import-"));
+    await writeFile(
+      path.join(dataDir, "events.json"),
+      `${JSON.stringify(
+        [
+          {
+            id: "evt-imported",
+            title: "Imported match",
+            createdBy: "alice",
+            inviteeIds: ["bob"],
+            invites: [{ eventId: "evt-imported", userId: "bob", at: "2026-08-01T10:00:00.000Z" }],
+            status: "open",
+            finalSlotId: null,
+            slots: [],
+            votes: [],
+          },
+        ],
+        null,
+        2,
+      )}\n`,
+    );
+    app = createApp({ dataDir, examplePath, configExamplePath, publicDir });
+    server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    const { port } = server.address();
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  after(async () => {
+    await closeServer(server, app);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it("imports a valid events.json into an empty database", async () => {
+    const res = await fetch(`${base}/api/events`, asUser("alice"));
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.events.length, 1);
+    assert.equal(body.events[0].id, "evt-imported");
+    assert.equal(body.events[0].title, "Imported match");
+  });
+});
+
 describe("calendar app behind portal identity", { concurrency: false }, () => {
   let dataDir;
   let server;
+  let app;
   let base;
 
   function asPortal(email, name, init = {}) {
@@ -288,7 +345,7 @@ describe("calendar app behind portal identity", { concurrency: false }, () => {
 
   before(async () => {
     dataDir = await mkdtemp(path.join(os.tmpdir(), "calendar-portal-"));
-    const app = createApp({
+    app = createApp({
       dataDir,
       examplePath,
       publicDir,
@@ -301,9 +358,7 @@ describe("calendar app behind portal identity", { concurrency: false }, () => {
   });
 
   after(async () => {
-    await new Promise((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
-    });
+    await closeServer(server, app);
     await rm(dataDir, { recursive: true, force: true });
   });
 
@@ -348,5 +403,15 @@ describe("calendar app behind portal identity", { concurrency: false }, () => {
 
     const asCara = await fetch(`${base}/api/events/${event.id}`, asPortal("cara@example.com", "Cara"));
     assert.equal(asCara.status, 403);
+  });
+
+  it("does not seed the standalone example into an empty embedded database", async () => {
+    const res = await fetch(`${base}/api/events`, asPortal("ada@example.com", "Ada"));
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(
+      body.events.some((item) => item.title === "Tennis match"),
+      false,
+    );
   });
 });

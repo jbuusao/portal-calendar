@@ -1,5 +1,7 @@
 node_modules/
 data/events.json
 data/config.json
+data/*.sqlite
+data/*.sqlite-*
 *.log
 .DS_Store

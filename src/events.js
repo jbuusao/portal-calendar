@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { simulateInvites } from "./invite.js";
 
@@ -12,15 +12,6 @@ export function isEmail(value) {
 
 export function eventsFile(dataDir) {
   return path.join(dataDir, "events.json");
-}
-
-export function ensureEventsFile(dataDir, examplePath) {
-  mkdirSync(dataDir, { recursive: true });
-  const dest = eventsFile(dataDir);
-  if (!existsSync(dest)) {
-    copyFileSync(examplePath, dest);
-  }
-  return dest;
 }
 
 function needsExampleSeed(raw) {
@@ -159,19 +150,126 @@ export function normalizeEvents(raw, knownUserIds) {
   return raw.map((item, index) => normalizeEvent(item, index, knownUserIds));
 }
 
-export function readEvents(dataDir, examplePath, knownUserIds) {
-  const dest = ensureEventsFile(dataDir, examplePath);
-  let raw = JSON.parse(readFileSync(dest, "utf8"));
-  if (needsExampleSeed(raw) && examplePath && existsSync(examplePath)) {
-    copyFileSync(examplePath, dest);
-    raw = JSON.parse(readFileSync(dest, "utf8"));
-  }
-  return normalizeEvents(raw, knownUserIds);
+function rowToEvent(db, row) {
+  const inviteeIds = db.prepare("SELECT user_id FROM invitees WHERE event_id = ? ORDER BY user_id").all(row.id).map((item) => item.user_id);
+  const invites = db
+    .prepare("SELECT event_id, user_id, at FROM invites WHERE event_id = ? ORDER BY user_id")
+    .all(row.id)
+    .map((item) => ({ eventId: item.event_id, userId: item.user_id, at: item.at }));
+  const slots = db
+    .prepare("SELECT id, date, start, suggested_by FROM slots WHERE event_id = ? ORDER BY date, start")
+    .all(row.id)
+    .map((item) => ({ id: item.id, date: item.date, start: item.start, suggestedBy: item.suggested_by }));
+  const votes = db
+    .prepare(
+      `SELECT votes.slot_id, votes.user_id
+       FROM votes
+       JOIN slots ON slots.id = votes.slot_id
+       WHERE slots.event_id = ?
+       ORDER BY votes.slot_id, votes.user_id`,
+    )
+    .all(row.id)
+    .map((item) => ({ slotId: item.slot_id, userId: item.user_id }));
+  return {
+    id: row.id,
+    title: row.title,
+    createdBy: row.created_by,
+    inviteeIds,
+    invites,
+    status: row.status,
+    finalSlotId: row.final_slot_id,
+    slots,
+    votes,
+  };
 }
 
-export function writeEvents(dataDir, events) {
-  mkdirSync(dataDir, { recursive: true });
-  writeFileSync(eventsFile(dataDir), `${JSON.stringify(events, null, 2)}\n`);
+export function loadEvents(db) {
+  return db.prepare("SELECT id, title, created_by, status, final_slot_id FROM events ORDER BY id").all().map((row) => rowToEvent(db, row));
+}
+
+export function loadEvent(db, id) {
+  const row = db.prepare("SELECT id, title, created_by, status, final_slot_id FROM events WHERE id = ?").get(id);
+  return row ? rowToEvent(db, row) : null;
+}
+
+export function saveEvent(db, event) {
+  const persist = db.transaction((item) => {
+    db.prepare("DELETE FROM events WHERE id = ?").run(item.id);
+    db.prepare("INSERT INTO events (id, title, created_by, status, final_slot_id) VALUES (?, ?, ?, ?, ?)").run(
+      item.id,
+      item.title,
+      item.createdBy,
+      item.status,
+      item.finalSlotId,
+    );
+    const insertInvitee = db.prepare("INSERT INTO invitees (event_id, user_id) VALUES (?, ?)");
+    for (const userId of item.inviteeIds) {
+      insertInvitee.run(item.id, userId);
+    }
+    const insertInvite = db.prepare("INSERT INTO invites (event_id, user_id, at) VALUES (?, ?, ?)");
+    for (const invite of item.invites) {
+      insertInvite.run(item.id, invite.userId, invite.at);
+    }
+    const insertSlot = db.prepare("INSERT INTO slots (id, event_id, date, start, suggested_by) VALUES (?, ?, ?, ?, ?)");
+    for (const slot of item.slots) {
+      insertSlot.run(slot.id, item.id, slot.date, slot.start, slot.suggestedBy);
+    }
+    const insertVote = db.prepare("INSERT INTO votes (slot_id, user_id) VALUES (?, ?)");
+    for (const vote of item.votes) {
+      insertVote.run(vote.slotId, vote.userId);
+    }
+  });
+  persist(event);
+  return event;
+}
+
+function tryReadJsonEvents(file, knownUserIds) {
+  if (!file || !existsSync(file)) {
+    return null;
+  }
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+  if (needsExampleSeed(raw)) {
+    return null;
+  }
+  try {
+    return normalizeEvents(raw, knownUserIds);
+  } catch {
+    return null;
+  }
+}
+
+export function initializeEventsStore(db, { dataDir, examplePath, knownUserIds, seedExample = false } = {}) {
+  const count = db.prepare("SELECT COUNT(*) AS n FROM events").get().n;
+  if (count > 0) {
+    return;
+  }
+  const imported = tryReadJsonEvents(eventsFile(dataDir), knownUserIds);
+  if (imported) {
+    const persist = db.transaction((events) => {
+      for (const event of events) {
+        saveEvent(db, event);
+      }
+    });
+    persist(imported);
+    return;
+  }
+  if (!seedExample || !examplePath) {
+    return;
+  }
+  const seeded = tryReadJsonEvents(examplePath, knownUserIds);
+  if (seeded) {
+    const persist = db.transaction((events) => {
+      for (const event of events) {
+        saveEvent(db, event);
+      }
+    });
+    persist(seeded);
+  }
 }
 
 export function eventsForUser(events, userId) {
