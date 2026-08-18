@@ -1,6 +1,7 @@
 import path from "node:path";
 import express from "express";
-import { publicUser, readUsers, requireUser } from "./auth.js";
+import { publicUser, requireUser, usersFromConfig } from "./auth.js";
+import { createContext } from "./context.js";
 import {
   addSlot,
   createEvent,
@@ -21,14 +22,21 @@ export function createApp({
   examplePath,
   configExamplePath,
   publicDir,
-  trustProxyIdentity = false,
+  context,
+  env,
 }) {
   const app = express();
   app.use(express.json({ limit: "32kb" }));
 
-  const authCtx = { dataDir, configExamplePath, trustProxyIdentity };
+  const ctx =
+    context ??
+    createContext({
+      dataDir,
+      configExamplePath,
+      env,
+    });
   const directoryIds = () =>
-    trustProxyIdentity ? null : new Set(readUsers(dataDir, configExamplePath).map((user) => user.id));
+    ctx.embedded ? null : new Set(usersFromConfig(ctx.config()).map((user) => user.id));
   const loadEvents = () => readEvents(dataDir, examplePath, directoryIds());
   const save = (events) => {
     writeEvents(dataDir, events);
@@ -40,29 +48,23 @@ export function createApp({
   });
 
   app.get("/api/session", (req, res) => {
-    const user = requireUser(req, res, authCtx);
-    if (!user) {
-      return;
-    }
+    const user = ctx.user(req);
     res.json({
-      user: publicUser(user),
-      source: user.source,
-      canSwitchUser: !trustProxyIdentity,
-      inviteMode: trustProxyIdentity ? "email" : "directory",
+      mode: ctx.mode,
+      user: user ? publicUser(user) : null,
+      source: user?.source ?? null,
+      canSwitchUser: ctx.standalone,
+      inviteMode: ctx.embedded ? "email" : "directory",
     });
   });
 
-  app.get("/api/users", (req, res) => {
-    if (trustProxyIdentity) {
-      const user = requireUser(req, res, authCtx);
-      if (!user) {
-        return;
-      }
+  app.get("/api/users", (_req, res) => {
+    if (ctx.embedded) {
       res.json({ users: [], inviteMode: "email" });
       return;
     }
     try {
-      const users = readUsers(dataDir, configExamplePath).map(({ id, name, email }) => ({ id, name, email }));
+      const users = usersFromConfig(ctx.config()).map(({ id, name, email }) => ({ id, name, email }));
       res.json({ users, inviteMode: "directory" });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : "invalid config" });
@@ -70,7 +72,7 @@ export function createApp({
   });
 
   app.get("/api/events", (req, res) => {
-    const user = requireUser(req, res, authCtx);
+    const user = requireUser(req, res, ctx);
     if (!user) {
       return;
     }
@@ -82,7 +84,7 @@ export function createApp({
   });
 
   app.post("/api/events", (req, res) => {
-    const user = requireUser(req, res, authCtx);
+    const user = requireUser(req, res, ctx);
     if (!user) {
       return;
     }
@@ -103,7 +105,7 @@ export function createApp({
   });
 
   app.get("/api/events/:id", (req, res) => {
-    const user = requireUser(req, res, authCtx);
+    const user = requireUser(req, res, ctx);
     if (!user) {
       return;
     }
@@ -124,7 +126,7 @@ export function createApp({
   });
 
   app.post("/api/events/:id/slots", (req, res) => {
-    const user = requireUser(req, res, authCtx);
+    const user = requireUser(req, res, ctx);
     if (!user) {
       return;
     }
@@ -148,7 +150,7 @@ export function createApp({
   });
 
   app.post("/api/events/:id/slots/:slotId/vote", (req, res) => {
-    const user = requireUser(req, res, authCtx);
+    const user = requireUser(req, res, ctx);
     if (!user) {
       return;
     }
@@ -172,7 +174,7 @@ export function createApp({
   });
 
   app.post("/api/events/:id/lock", (req, res) => {
-    const user = requireUser(req, res, authCtx);
+    const user = requireUser(req, res, ctx);
     if (!user) {
       return;
     }

@@ -94,6 +94,92 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.view-switcher {
+  position: relative;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.view-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 6.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  padding: 0.45rem 0.7rem 0.45rem 0.9rem;
+  font: 500 14px/1 var(--font);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.view-menu-btn:hover,
+.view-menu-btn[aria-expanded="true"] {
+  background: var(--hover);
+}
+
+.view-chevron {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--muted);
+}
+
+.view-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.3rem);
+  min-width: 13.5rem;
+  padding: 0.5rem 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow:
+    0 1px 3px 0 color-mix(in srgb, var(--text) 18%, transparent),
+    0 4px 8px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  z-index: 20;
+}
+
+.view-option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0.65rem 1.1rem 0.65rem 0.85rem;
+  font: 400 14px/1 var(--font);
+  cursor: pointer;
+  text-align: left;
+}
+
+.view-option:hover {
+  background: var(--hover);
+}
+
+.view-check {
+  width: 1.1rem;
+  color: var(--text);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.view-name {
+  flex: 1;
+}
+
+.view-shortcut {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
 }
 
 .user-switcher {
@@ -356,9 +442,24 @@ select {
   cursor: default;
 }
 
+.mini-day.in-week:not(.today) {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 0;
+}
+
+.mini-day.in-week.week-start:not(.today) {
+  border-radius: 50% 0 0 50%;
+}
+
+.mini-day.in-week.week-end:not(.today) {
+  border-radius: 0 50% 50% 0;
+}
+
 .mini-day.selected:not(.today) {
   background: var(--accent-soft);
   color: var(--accent);
+  border-radius: 50%;
 }
 
 .mini-day.today {
@@ -368,7 +469,8 @@ select {
 }
 
 .mini-day.pulse,
-.cell.pulse .day {
+.cell.pulse .day,
+.time-weekday.pulse .time-weekday-num {
   animation: pulse 0.7s ease;
 }
 
@@ -438,6 +540,107 @@ input:focus {
   grid-template-columns: repeat(7, minmax(0, 1fr));
   grid-template-rows: auto repeat(6, minmax(0, 1fr));
   height: 100%;
+}
+
+.time-grid {
+  display: grid;
+  height: 100%;
+  overflow: auto;
+  grid-template-rows: auto repeat(17, minmax(2.75rem, 1fr));
+}
+
+.time-grid-week {
+  grid-template-columns: 3.5rem repeat(7, minmax(0, 1fr));
+}
+
+.time-grid-day {
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+}
+
+.time-corner,
+.time-weekday {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.time-weekday {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.45rem 0 0.4rem;
+  cursor: pointer;
+}
+
+.time-weekday-name {
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.time-weekday-num {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 2.1rem;
+  text-align: center;
+}
+
+.time-weekday.today .time-weekday-name {
+  color: var(--accent);
+}
+
+.time-weekday.today .time-weekday-num {
+  background: var(--accent);
+  color: var(--today-fg);
+}
+
+.time-weekday:hover .time-weekday-num {
+  background: var(--hover);
+}
+
+.time-weekday.today:hover .time-weekday-num {
+  background: var(--accent);
+}
+
+.time-weekday.selected:not(.today) .time-weekday-num {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.time-hour {
+  font-size: 0.65rem;
+  color: var(--muted);
+  text-align: right;
+  padding: 0.15rem 0.45rem 0 0;
+  line-height: 1;
+}
+
+.time-cell {
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  padding: 0.15rem 0.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.time-cell.selected:not(.today-col) {
+  background: color-mix(in srgb, var(--accent-soft) 35%, transparent);
+}
+
+.time-cell.today-col {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .weekday {
@@ -536,7 +739,8 @@ input:focus {
     border-bottom: 1px solid var(--border);
   }
 
-  .calendar-grid {
+  .calendar-grid,
+  .time-grid {
     min-height: 32rem;
   }
 }

@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createApp } from "../src/app.js";
+import { createContext } from "../src/context.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const examplePath = path.join(root, "data", "events.example.json");
@@ -216,11 +217,55 @@ describe("calendar app", { concurrency: false }, () => {
     const res = await fetch(`${base}/api/session`, asUser("alice"));
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), {
+      mode: "standalone",
       user: { id: "alice", name: "Alice", email: "alice@example.com" },
       source: "test",
       canSwitchUser: true,
       inviteMode: "directory",
     });
+  });
+
+  it("returns a null user when no test header is set", async () => {
+    const res = await fetch(`${base}/api/session`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.mode, "standalone");
+    assert.equal(body.user, null);
+  });
+});
+
+describe("legacy dummy events.json", { concurrency: false }, () => {
+  let dataDir;
+  let server;
+  let base;
+
+  before(async () => {
+    dataDir = await mkdtemp(path.join(os.tmpdir(), "calendar-legacy-"));
+    await writeFile(
+      path.join(dataDir, "events.json"),
+      `${JSON.stringify([{ id: "evt-old", day: 4, title: "Tennis" }], null, 2)}\n`,
+    );
+    const app = createApp({ dataDir, examplePath, configExamplePath, publicDir });
+    server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    const { port } = server.address();
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it("reseeds from the example file when createdBy is missing", async () => {
+    const res = await fetch(`${base}/api/events`, asUser("alice"));
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.events.length, 1);
+    assert.equal(body.events[0].title, "Tennis match");
+    assert.equal(body.events[0].createdBy, "alice");
   });
 });
 
@@ -246,9 +291,8 @@ describe("calendar app behind portal identity", { concurrency: false }, () => {
     const app = createApp({
       dataDir,
       examplePath,
-      configExamplePath,
       publicDir,
-      trustProxyIdentity: true,
+      context: createContext({ mode: "embedded", slug: "calendar", config: {} }),
     });
     server = app.listen(0, "127.0.0.1");
     await new Promise((resolve) => server.once("listening", resolve));
@@ -263,17 +307,22 @@ describe("calendar app behind portal identity", { concurrency: false }, () => {
     await rm(dataDir, { recursive: true, force: true });
   });
 
-  it("ignores X-Test-User and requires proxy identity", async () => {
+  it("ignores X-Test-User and exposes a null session without proxy identity", async () => {
     const spoof = await fetch(`${base}/api/events`, asUser("alice"));
     assert.equal(spoof.status, 401);
     const missing = await fetch(`${base}/api/session`);
-    assert.equal(missing.status, 401);
+    assert.equal(missing.status, 200);
+    const body = await missing.json();
+    assert.equal(body.mode, "embedded");
+    assert.equal(body.user, null);
+    assert.equal(body.canSwitchUser, false);
   });
 
   it("uses X-Auth-Request-Email as the user id", async () => {
     const res = await fetch(`${base}/api/session`, asPortal("ada@example.com", "Ada"));
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), {
+      mode: "embedded",
       user: { id: "ada@example.com", name: "Ada", email: "ada@example.com" },
       source: "portal",
       canSwitchUser: false,

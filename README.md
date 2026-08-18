@@ -1,8 +1,12 @@
 # Calendar
 
-Group event scheduler. Serves the UI at `/` on port 3000. In this repo, test users come from `data/config.json` (seeded from `data/config.example.json`). Events persist in `data/events.json` (seeded from `data/events.example.json`).
+Group event scheduler. Serves the UI at `/` on port 3000.
 
-This repo is the source of truth. The home portal vendor-copies it into `apps/calendar` with `portal-import.sh`.
+Standalone config lives in `data/config.json` (seeded from `data/config.example.json`). Events persist in `data/events.json` (seeded from `data/events.example.json`).
+
+`src/context.js` is the app Context: it knows standalone vs portal-embedded, reads config, and returns the authenticated user (or `null`).
+
+This repo is the source of truth. The home portal vendor-copies it into `apps/<slug>` with `portal-import.sh`. Import copies this config into `config/plugins.json` under that slug.
 
 ## Run
 
@@ -14,7 +18,7 @@ npm test
 
 `GET /health` returns 200 when ready. Durable writes stay under `./data`. No TLS and no login page of its own — the portal owns those.
 
-Standalone mode uses `X-Test-User` and a user switcher. Behind the portal, set `TRUST_PROXY_IDENTITY=1` and the app reads `X-Auth-Request-Email` / `X-Auth-Request-User` (the switcher is hidden). Event membership stays in this app; who can open `/calendar` stays in portal RBAC.
+Standalone mode uses `X-Test-User` and a user switcher. Behind the portal, `PORTAL_MODE=embedded` (set by Compose). Context then reads `config/plugins.json[<slug>]` and `X-Auth-Request-Email` / `X-Auth-Request-User`. Event membership stays in this app; who can open the app stays in portal RBAC.
 
 ## Import into the portal
 

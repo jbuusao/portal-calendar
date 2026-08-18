@@ -23,6 +23,16 @@ export function ensureEventsFile(dataDir, examplePath) {
   return dest;
 }
 
+function needsExampleSeed(raw) {
+  if (!Array.isArray(raw)) {
+    return true;
+  }
+  if (raw.length === 0) {
+    return false;
+  }
+  return raw.every((item) => !item || typeof item !== "object" || !String(item.createdBy ?? "").trim());
+}
+
 export function isIsoDate(value) {
   if (!DATE_RE.test(value)) {
     return false;
@@ -151,7 +161,12 @@ export function normalizeEvents(raw, knownUserIds) {
 
 export function readEvents(dataDir, examplePath, knownUserIds) {
   const dest = ensureEventsFile(dataDir, examplePath);
-  return normalizeEvents(JSON.parse(readFileSync(dest, "utf8")), knownUserIds);
+  let raw = JSON.parse(readFileSync(dest, "utf8"));
+  if (needsExampleSeed(raw) && examplePath && existsSync(examplePath)) {
+    copyFileSync(examplePath, dest);
+    raw = JSON.parse(readFileSync(dest, "utf8"));
+  }
+  return normalizeEvents(raw, knownUserIds);
 }
 
 export function writeEvents(dataDir, events) {

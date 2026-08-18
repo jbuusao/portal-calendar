@@ -2,6 +2,9 @@ const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MINI_WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 const HOURS = Array.from({ length: 17 }, (_, i) => `${String(i + 6).padStart(2, "0")}:00`);
 const USER_KEY = "calendar-test-user";
+const VIEW_KEY = "calendar-view";
+const VIEWS = ["day", "week", "month"];
+const VIEW_LABELS = { day: "Day", week: "Week", month: "Month" };
 
 const userSelect = document.getElementById("user-select");
 const userSwitcher = document.getElementById("user-switcher");
@@ -19,6 +22,9 @@ const titleInput = document.getElementById("event-title");
 const inviteeOptions = document.getElementById("invitee-options");
 const monthLabel = document.getElementById("month-label");
 const eventTitleLabel = document.getElementById("event-title-label");
+const viewMenuBtn = document.getElementById("view-menu-btn");
+const viewMenu = document.getElementById("view-menu");
+const viewMenuLabel = document.getElementById("view-menu-label");
 const miniMonthLabel = document.getElementById("mini-month-label");
 const miniGrid = document.getElementById("mini-grid");
 const grid = document.getElementById("grid");
@@ -43,6 +49,8 @@ let selectedSlotId = null;
 let viewYear = now.getFullYear();
 let viewMonth = now.getMonth();
 let selectedDate = toIsoDate(now);
+const storedView = localStorage.getItem(VIEW_KEY);
+let calendarView = VIEWS.includes(storedView) ? storedView : "month";
 
 for (const hour of HOURS) {
   const option = document.createElement("option");
@@ -79,6 +87,48 @@ function monthCells(year, month) {
     date.setDate(start.getDate() + i);
     return date;
   });
+}
+
+function startOfWeek(date) {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const mondayOffset = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - mondayOffset);
+  return start;
+}
+
+function weekCells(fromDate) {
+  const start = startOfWeek(fromDate instanceof Date ? fromDate : parseIsoDate(fromDate));
+  return Array.from({ length: 7 }, (_, i) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + i);
+    return date;
+  });
+}
+
+function viewTitle() {
+  if (calendarView === "day") {
+    return parseIsoDate(selectedDate).toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  }
+  if (calendarView === "week") {
+    const days = weekCells(selectedDate);
+    const start = days[0];
+    const end = days[6];
+    const startMonth = start.toLocaleString("en-GB", { month: "long" });
+    const endMonth = end.toLocaleString("en-GB", { month: "long" });
+    if (start.getFullYear() === end.getFullYear()) {
+      if (start.getMonth() === end.getMonth()) {
+        return `${startMonth} ${start.getFullYear()}`;
+      }
+      return `${startMonth} – ${endMonth} ${end.getFullYear()}`;
+    }
+    return `${startMonth} ${start.getFullYear()} – ${endMonth} ${end.getFullYear()}`;
+  }
+  return monthTitle(viewYear, viewMonth);
 }
 
 function showError(message) {
@@ -226,6 +276,7 @@ function renderMini() {
     miniGrid.append(el);
   }
   const todayIso = toIsoDate(now);
+  const weekIsos = calendarView === "month" ? null : new Set(weekCells(selectedDate).map(toIsoDate));
   for (const date of monthCells(viewYear, viewMonth)) {
     const iso = toIsoDate(date);
     const inMonth = date.getMonth() === viewMonth;
@@ -243,6 +294,15 @@ function renderMini() {
     if (iso === selectedDate) {
       button.classList.add("selected");
     }
+    if (weekIsos?.has(iso)) {
+      button.classList.add("in-week");
+      if (date.getDay() === 1) {
+        button.classList.add("week-start");
+      }
+      if (date.getDay() === 0) {
+        button.classList.add("week-end");
+      }
+    }
     button.addEventListener("click", () => selectDate(iso, { goToMonth: true }));
     miniGrid.append(button);
   }
@@ -252,15 +312,61 @@ function voteCount(slotId) {
   return currentEvent.votes.filter((vote) => vote.slotId === slotId).length;
 }
 
-function renderGrid() {
+function slotsByDate() {
   const byDate = new Map();
   for (const slot of currentEvent.slots) {
     const list = byDate.get(slot.date) ?? [];
     list.push(slot);
     byDate.set(slot.date, list);
   }
+  for (const list of byDate.values()) {
+    list.sort((a, b) => a.start.localeCompare(b.start));
+  }
+  return byDate;
+}
+
+function createSlotButton(slot, iso) {
   const total = participantIds(currentEvent).length;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "event";
+  const count = voteCount(slot.id);
+  button.textContent = calendarView === "month" ? `${slot.start} · ${count}/${total}` : `${count}/${total}`;
+  if (currentEvent.votes.some((vote) => vote.slotId === slot.id && vote.userId === currentUserId)) {
+    button.classList.add("mine");
+  }
+  if (currentEvent.status === "final") {
+    if (slot.id === currentEvent.finalSlotId) {
+      button.classList.add("final-slot");
+    } else {
+      button.classList.add("dimmed");
+    }
+  }
+  if (slot.id === selectedSlotId) {
+    button.classList.add("selected-slot");
+  }
+  button.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    selectedSlotId = slot.id;
+    selectDate(iso);
+    if (currentEvent.status === "open") {
+      try {
+        showError("");
+        const data = await api(`./api/events/${currentEvent.id}/slots/${slot.id}/vote`, { method: "POST" });
+        currentEvent = data.event;
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+    renderCalendar();
+  });
+  return button;
+}
+
+function renderMonthGrid() {
+  const byDate = slotsByDate();
   const todayIso = toIsoDate(now);
+  grid.className = "calendar-grid";
   grid.replaceChildren();
   for (const label of WEEKDAYS) {
     const el = document.createElement("div");
@@ -287,46 +393,80 @@ function renderGrid() {
     dayEl.className = "day";
     dayEl.textContent = String(date.getDate());
     cell.append(dayEl);
-    const slots = (byDate.get(iso) ?? []).slice().sort((a, b) => a.start.localeCompare(b.start));
-    for (const slot of slots) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "event";
-      const count = voteCount(slot.id);
-      button.textContent = `${slot.start} · ${count}/${total}`;
-      if (currentEvent.votes.some((vote) => vote.slotId === slot.id && vote.userId === currentUserId)) {
-        button.classList.add("mine");
-      }
-      if (currentEvent.status === "final") {
-        if (slot.id === currentEvent.finalSlotId) {
-          button.classList.add("final-slot");
-        } else {
-          button.classList.add("dimmed");
-        }
-      }
-      if (slot.id === selectedSlotId) {
-        button.classList.add("selected-slot");
-      }
-      button.addEventListener("click", async (ev) => {
-        ev.stopPropagation();
-        selectedSlotId = slot.id;
-        selectDate(iso);
-        if (currentEvent.status === "open") {
-          try {
-            showError("");
-            const data = await api(`./api/events/${currentEvent.id}/slots/${slot.id}/vote`, { method: "POST" });
-            currentEvent = data.event;
-          } catch (err) {
-            showError(err.message);
-          }
-        }
-        renderCalendar();
-      });
-      cell.append(button);
+    for (const slot of byDate.get(iso) ?? []) {
+      cell.append(createSlotButton(slot, iso));
     }
     cell.addEventListener("click", () => selectDate(iso, { goToMonth: !inMonth }));
     grid.append(cell);
   }
+}
+
+function renderTimeGrid(days) {
+  const byDate = slotsByDate();
+  const todayIso = toIsoDate(now);
+  grid.className = `time-grid time-grid-${calendarView}`;
+  grid.replaceChildren();
+  const corner = document.createElement("div");
+  corner.className = "time-corner";
+  grid.append(corner);
+  for (const date of days) {
+    const iso = toIsoDate(date);
+    const wrap = document.createElement("div");
+    wrap.className = "time-weekday";
+    wrap.dataset.date = iso;
+    if (iso === todayIso) {
+      wrap.classList.add("today");
+    }
+    if (iso === selectedDate) {
+      wrap.classList.add("selected");
+    }
+    const name = document.createElement("div");
+    name.className = "time-weekday-name";
+    name.textContent = date.toLocaleDateString("en-GB", { weekday: "short" });
+    const num = document.createElement("div");
+    num.className = "time-weekday-num";
+    num.textContent = String(date.getDate());
+    wrap.append(name, num);
+    wrap.addEventListener("click", () => selectDate(iso, { goToMonth: true }));
+    grid.append(wrap);
+  }
+  for (const hour of HOURS) {
+    const label = document.createElement("div");
+    label.className = "time-hour";
+    label.textContent = hour;
+    grid.append(label);
+    for (const date of days) {
+      const iso = toIsoDate(date);
+      const cell = document.createElement("div");
+      cell.className = "time-cell";
+      cell.dataset.date = iso;
+      cell.dataset.hour = hour;
+      if (iso === todayIso) {
+        cell.classList.add("today-col");
+      }
+      if (iso === selectedDate) {
+        cell.classList.add("selected");
+      }
+      const hourSlots = (byDate.get(iso) ?? []).filter((slot) => slot.start === hour);
+      for (const slot of hourSlots) {
+        cell.append(createSlotButton(slot, iso));
+      }
+      cell.addEventListener("click", () => {
+        slotHour.value = hour;
+        selectDate(iso);
+      });
+      grid.append(cell);
+    }
+  }
+}
+
+function renderGrid() {
+  if (calendarView === "month") {
+    renderMonthGrid();
+    return;
+  }
+  const days = calendarView === "week" ? weekCells(selectedDate) : [parseIsoDate(selectedDate)];
+  renderTimeGrid(days);
 }
 
 function updateLockButton() {
@@ -340,7 +480,7 @@ function updateLockButton() {
 }
 
 function renderCalendar() {
-  monthLabel.textContent = monthTitle(viewYear, viewMonth);
+  monthLabel.textContent = viewTitle();
   eventTitleLabel.textContent = currentEvent.title;
   selectedDateLabel.textContent = parseIsoDate(selectedDate).toLocaleDateString("en-GB", {
     weekday: "short",
@@ -348,10 +488,61 @@ function renderCalendar() {
     month: "short",
   });
   suggestForm.classList.toggle("hidden", currentEvent.status !== "open");
+  updateViewSwitcher();
   renderPeople();
   renderMini();
   renderGrid();
   updateLockButton();
+}
+
+function closeViewMenu() {
+  viewMenu.classList.add("hidden");
+  viewMenuBtn.setAttribute("aria-expanded", "false");
+}
+
+function updateViewSwitcher() {
+  viewMenuLabel.textContent = VIEW_LABELS[calendarView];
+  for (const option of viewMenu.querySelectorAll(".view-option")) {
+    const selected = option.dataset.view === calendarView;
+    option.classList.toggle("selected", selected);
+    option.querySelector(".view-check").textContent = selected ? "✓" : "";
+  }
+  const period = VIEW_LABELS[calendarView].toLowerCase();
+  prevMonthBtn.setAttribute("aria-label", `Previous ${period}`);
+  nextMonthBtn.setAttribute("aria-label", `Next ${period}`);
+}
+
+function setCalendarView(view) {
+  if (!VIEWS.includes(view) || view === calendarView) {
+    closeViewMenu();
+    return;
+  }
+  calendarView = view;
+  localStorage.setItem(VIEW_KEY, view);
+  closeViewMenu();
+  const date = parseIsoDate(selectedDate);
+  viewYear = date.getFullYear();
+  viewMonth = date.getMonth();
+  if (currentEvent) {
+    renderCalendar();
+  } else {
+    updateViewSwitcher();
+  }
+}
+
+function shiftPeriod(delta) {
+  const date = parseIsoDate(selectedDate);
+  if (calendarView === "day") {
+    date.setDate(date.getDate() + delta);
+  } else if (calendarView === "week") {
+    date.setDate(date.getDate() + delta * 7);
+  } else {
+    date.setMonth(date.getMonth() + delta, 1);
+  }
+  selectedDate = toIsoDate(date);
+  viewYear = date.getFullYear();
+  viewMonth = date.getMonth();
+  renderCalendar();
 }
 
 function selectDate(iso, { goToMonth = false } = {}) {
@@ -374,12 +565,12 @@ function goToToday({ pulse = false } = {}) {
   if (!pulse) {
     return;
   }
-  for (const el of document.querySelectorAll(".cell.today, .mini-day.today")) {
+  for (const el of document.querySelectorAll(".cell.today, .mini-day.today, .time-weekday.today")) {
     el.classList.remove("pulse");
     void el.offsetWidth;
     el.classList.add("pulse");
   }
-  document.querySelector(".cell.today")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  document.querySelector(".cell.today, .time-weekday.today")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 async function loadList() {
@@ -475,28 +666,54 @@ backBtn.addEventListener("click", () => {
   showError("");
   loadList().catch((err) => showError(err.message));
 });
-prevMonthBtn.addEventListener("click", () => {
-  viewMonth -= 1;
-  if (viewMonth < 0) {
-    viewMonth = 11;
-    viewYear -= 1;
+prevMonthBtn.addEventListener("click", () => shiftPeriod(-1));
+nextMonthBtn.addEventListener("click", () => shiftPeriod(1));
+updateViewSwitcher();
+
+viewMenuBtn.addEventListener("click", () => {
+  const willOpen = viewMenu.classList.contains("hidden");
+  if (willOpen) {
+    viewMenu.classList.remove("hidden");
+    viewMenuBtn.setAttribute("aria-expanded", "true");
+  } else {
+    closeViewMenu();
   }
-  selectedDate = toIsoDate(new Date(viewYear, viewMonth, 1));
-  renderCalendar();
 });
-nextMonthBtn.addEventListener("click", () => {
-  viewMonth += 1;
-  if (viewMonth > 11) {
-    viewMonth = 0;
-    viewYear += 1;
+viewMenu.addEventListener("click", (event) => {
+  const option = event.target.closest(".view-option");
+  if (option) {
+    setCalendarView(option.dataset.view);
   }
-  selectedDate = toIsoDate(new Date(viewYear, viewMonth, 1));
-  renderCalendar();
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".view-switcher")) {
+    closeViewMenu();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeViewMenu();
+    return;
+  }
+  if (event.metaKey || event.ctrlKey || event.altKey) {
+    return;
+  }
+  if (event.target.closest("input, textarea, select")) {
+    return;
+  }
+  if (calendarNav.classList.contains("hidden")) {
+    return;
+  }
+  const view = { d: "day", w: "week", m: "month" }[event.key.toLowerCase()];
+  if (view) {
+    event.preventDefault();
+    setCalendarView(view);
+  }
 });
 
 try {
   let session = await api("./api/session").catch(() => null);
-  if (session?.user) {
+  if (session) {
     applyChrome(session);
   }
   if (canSwitchUser) {
