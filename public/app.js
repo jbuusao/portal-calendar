@@ -4,6 +4,11 @@ const HOURS = Array.from({ length: 17 }, (_, i) => `${String(i + 6).padStart(2, 
 const USER_KEY = "calendar-test-user";
 
 const userSelect = document.getElementById("user-select");
+const userSwitcher = document.getElementById("user-switcher");
+const signedIn = document.getElementById("signed-in");
+const inviteeFieldset = document.getElementById("invitee-fieldset");
+const emailInviteLabel = document.getElementById("email-invite-label");
+const inviteEmails = document.getElementById("invite-emails");
 const listHeading = document.getElementById("list-heading");
 const calendarNav = document.getElementById("calendar-nav");
 const viewList = document.getElementById("view-list");
@@ -31,6 +36,8 @@ const errorBanner = document.getElementById("error-banner");
 const now = new Date();
 let users = [];
 let currentUserId = localStorage.getItem(USER_KEY) || "";
+let canSwitchUser = true;
+let inviteMode = "directory";
 let currentEvent = null;
 let selectedSlotId = null;
 let viewYear = now.getFullYear();
@@ -89,7 +96,7 @@ function userName(id) {
 
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers ?? {}) };
-  if (currentUserId) {
+  if (canSwitchUser && currentUserId) {
     headers["X-Test-User"] = currentUserId;
   }
   if (opts.body && !headers["Content-Type"]) {
@@ -101,6 +108,21 @@ async function api(path, opts = {}) {
     throw new Error(data.error || `Request failed (${res.status})`);
   }
   return data;
+}
+
+function applyChrome(session) {
+  canSwitchUser = Boolean(session?.canSwitchUser);
+  inviteMode = session?.inviteMode === "email" ? "email" : "directory";
+  if (session?.user) {
+    currentUserId = session.user.id;
+  }
+  userSwitcher.classList.toggle("hidden", !canSwitchUser);
+  signedIn.classList.toggle("hidden", canSwitchUser || !session?.user);
+  if (session?.user) {
+    signedIn.textContent = `Signed in as ${session.user.name}`;
+  }
+  inviteeFieldset.classList.toggle("hidden", inviteMode !== "directory");
+  emailInviteLabel.classList.toggle("hidden", inviteMode !== "email");
 }
 
 function showList() {
@@ -394,7 +416,13 @@ userSelect.addEventListener("change", async () => {
 
 createForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const inviteeIds = [...inviteeOptions.querySelectorAll("input:checked")].map((input) => input.value);
+  const inviteeIds =
+    inviteMode === "email"
+      ? inviteEmails.value
+          .split(/[,;\s]+/)
+          .map((part) => part.trim().toLowerCase())
+          .filter(Boolean)
+      : [...inviteeOptions.querySelectorAll("input:checked")].map((input) => input.value);
   try {
     showError("");
     await api("./api/events", {
@@ -402,6 +430,7 @@ createForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({ title: titleInput.value.trim(), inviteeIds }),
     });
     titleInput.value = "";
+    inviteEmails.value = "";
     for (const input of inviteeOptions.querySelectorAll("input")) {
       input.checked = false;
     }
@@ -466,10 +495,20 @@ nextMonthBtn.addEventListener("click", () => {
 });
 
 try {
-  const data = await api("./api/users");
-  users = data.users ?? [];
-  renderUserSelect();
-  renderInviteeOptions();
+  let session = await api("./api/session").catch(() => null);
+  if (session?.user) {
+    applyChrome(session);
+  }
+  if (canSwitchUser) {
+    const data = await api("./api/users");
+    users = data.users ?? [];
+    renderUserSelect();
+    renderInviteeOptions();
+    if (!session?.user) {
+      session = await api("./api/session");
+      applyChrome(session);
+    }
+  }
   await loadList();
 } catch (err) {
   showError(err.message);

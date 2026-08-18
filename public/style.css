@@ -104,6 +104,13 @@ body {
   white-space: nowrap;
 }
 
+.signed-in {
+  margin: 0 0 0 auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
 .user-switcher select,
 select {
   border: 1px solid var(--border);

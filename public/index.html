@@ -21,10 +21,11 @@
           <span id="event-title-label" class="event-title-label"></span>
         </div>
         <h1 id="list-heading" class="month-label">Events</h1>
-        <label class="user-switcher">
+        <label id="user-switcher" class="user-switcher">
           Acting as
           <select id="user-select"></select>
         </label>
+        <p id="signed-in" class="signed-in hidden"></p>
       </header>
       <p id="error-banner" class="error-banner hidden"></p>
       <div id="view-list" class="list-view">
@@ -33,10 +34,14 @@
             Event title
             <input id="event-title" type="text" maxlength="80" required placeholder="Tennis match" />
           </label>
-          <fieldset class="invitees">
+          <fieldset id="invitee-fieldset" class="invitees">
             <legend>Invite participants (simulated)</legend>
             <div id="invitee-options" class="invitee-options"></div>
           </fieldset>
+          <label id="email-invite-label" class="hidden">
+            Invite by email
+            <input id="invite-emails" type="text" placeholder="bob@example.com, cara@example.com" />
+          </label>
           <button type="submit" class="add-btn">Create event</button>
         </form>
         <ul id="event-list" class="event-list"></ul>
@@ -58,7 +63,8 @@
           </form>
           <button type="button" id="lock-btn" class="lock-btn hidden">Lock this slot</button>
           <p class="note" data-testid="dummy-calendar-note">
-            Test users and simulated invitations. Events are stored in <code>data/events.json</code>.
+            Portal grants access to this app. Event invites are recorded here. Durable data is in
+            <code>data/events.json</code>.
           </p>
         </aside>
         <main class="main">

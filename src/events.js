@@ -2,8 +2,13 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import path from "node:path";
 import { simulateInvites } from "./invite.js";
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const START_RE = /^(0[6-9]|1\d|2[0-2]):00$/;
+
+export function isEmail(value) {
+  return EMAIL_RE.test(value);
+}
 
 export function eventsFile(dataDir) {
   return path.join(dataDir, "events.json");
@@ -164,9 +169,14 @@ export function createEvent({ title, createdBy, inviteeIds, knownUserIds }) {
     throw new Error("title is required");
   }
   const id = `evt-${Date.now()}`;
-  const invitees = [...new Set((inviteeIds ?? []).map((item) => String(item).trim()))]
+  const invitees = [...new Set((inviteeIds ?? []).map((item) => String(item).trim().toLowerCase()))]
     .filter((userId) => userId && userId !== createdBy)
-    .filter((userId) => !knownUserIds || knownUserIds.has(userId));
+    .filter((userId) => {
+      if (knownUserIds) {
+        return knownUserIds.has(userId);
+      }
+      return isEmail(userId);
+    });
   return {
     id,
     title: trimmed,

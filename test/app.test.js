@@ -211,4 +211,93 @@ describe("calendar app", { concurrency: false }, () => {
     );
     assert.equal(res.status, 400);
   });
+
+  it("returns a switchable test session", async () => {
+    const res = await fetch(`${base}/api/session`, asUser("alice"));
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      user: { id: "alice", name: "Alice", email: "alice@example.com" },
+      source: "test",
+      canSwitchUser: true,
+      inviteMode: "directory",
+    });
+  });
+});
+
+describe("calendar app behind portal identity", { concurrency: false }, () => {
+  let dataDir;
+  let server;
+  let base;
+
+  function asPortal(email, name, init = {}) {
+    const headers = {
+      "X-Auth-Request-Email": email,
+      "X-Auth-Request-User": name,
+      ...(init.headers ?? {}),
+    };
+    if (init.body && !headers["Content-Type"]) {
+      headers["Content-Type"] = "application/json";
+    }
+    return { ...init, headers };
+  }
+
+  before(async () => {
+    dataDir = await mkdtemp(path.join(os.tmpdir(), "calendar-portal-"));
+    const app = createApp({
+      dataDir,
+      examplePath,
+      configExamplePath,
+      publicDir,
+      trustProxyIdentity: true,
+    });
+    server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    const { port } = server.address();
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it("ignores X-Test-User and requires proxy identity", async () => {
+    const spoof = await fetch(`${base}/api/events`, asUser("alice"));
+    assert.equal(spoof.status, 401);
+    const missing = await fetch(`${base}/api/session`);
+    assert.equal(missing.status, 401);
+  });
+
+  it("uses X-Auth-Request-Email as the user id", async () => {
+    const res = await fetch(`${base}/api/session`, asPortal("ada@example.com", "Ada"));
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      user: { id: "ada@example.com", name: "Ada", email: "ada@example.com" },
+      source: "portal",
+      canSwitchUser: false,
+      inviteMode: "email",
+    });
+  });
+
+  it("lets a portal user invite by email", async () => {
+    const created = await fetch(
+      `${base}/api/events`,
+      asPortal("ada@example.com", "Ada", {
+        method: "POST",
+        body: JSON.stringify({ title: "Portal match", inviteeIds: ["bob@example.com"] }),
+      }),
+    );
+    assert.equal(created.status, 201);
+    const { event } = await created.json();
+    assert.equal(event.createdBy, "ada@example.com");
+    assert.deepEqual(event.inviteeIds, ["bob@example.com"]);
+
+    const asBob = await fetch(`${base}/api/events`, asPortal("bob@example.com", "Bob"));
+    assert.ok((await asBob.json()).events.some((item) => item.id === event.id));
+
+    const asCara = await fetch(`${base}/api/events/${event.id}`, asPortal("cara@example.com", "Cara"));
+    assert.equal(asCara.status, 403);
+  });
 });

@@ -1,6 +1,6 @@
 import path from "node:path";
 import express from "express";
-import { readUsers, requireUser } from "./auth.js";
+import { publicUser, readUsers, requireUser } from "./auth.js";
 import {
   addSlot,
   createEvent,
@@ -16,12 +16,20 @@ function httpError(err, fallback = 400) {
   return err?.status ?? fallback;
 }
 
-export function createApp({ dataDir, examplePath, configExamplePath, publicDir }) {
+export function createApp({
+  dataDir,
+  examplePath,
+  configExamplePath,
+  publicDir,
+  trustProxyIdentity = false,
+}) {
   const app = express();
   app.use(express.json({ limit: "32kb" }));
 
-  const knownIds = () => new Set(readUsers(dataDir, configExamplePath).map((user) => user.id));
-  const loadEvents = () => readEvents(dataDir, examplePath, knownIds());
+  const authCtx = { dataDir, configExamplePath, trustProxyIdentity };
+  const directoryIds = () =>
+    trustProxyIdentity ? null : new Set(readUsers(dataDir, configExamplePath).map((user) => user.id));
+  const loadEvents = () => readEvents(dataDir, examplePath, directoryIds());
   const save = (events) => {
     writeEvents(dataDir, events);
     return events;
@@ -31,17 +39,38 @@ export function createApp({ dataDir, examplePath, configExamplePath, publicDir }
     res.json({ ok: true });
   });
 
-  app.get("/api/users", (_req, res) => {
+  app.get("/api/session", (req, res) => {
+    const user = requireUser(req, res, authCtx);
+    if (!user) {
+      return;
+    }
+    res.json({
+      user: publicUser(user),
+      source: user.source,
+      canSwitchUser: !trustProxyIdentity,
+      inviteMode: trustProxyIdentity ? "email" : "directory",
+    });
+  });
+
+  app.get("/api/users", (req, res) => {
+    if (trustProxyIdentity) {
+      const user = requireUser(req, res, authCtx);
+      if (!user) {
+        return;
+      }
+      res.json({ users: [], inviteMode: "email" });
+      return;
+    }
     try {
-      const users = readUsers(dataDir, configExamplePath).map(({ id, name }) => ({ id, name }));
-      res.json({ users });
+      const users = readUsers(dataDir, configExamplePath).map(({ id, name, email }) => ({ id, name, email }));
+      res.json({ users, inviteMode: "directory" });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : "invalid config" });
     }
   });
 
   app.get("/api/events", (req, res) => {
-    const user = requireUser(req, res, dataDir, configExamplePath);
+    const user = requireUser(req, res, authCtx);
     if (!user) {
       return;
     }
@@ -53,7 +82,7 @@ export function createApp({ dataDir, examplePath, configExamplePath, publicDir }
   });
 
   app.post("/api/events", (req, res) => {
-    const user = requireUser(req, res, dataDir, configExamplePath);
+    const user = requireUser(req, res, authCtx);
     if (!user) {
       return;
     }
@@ -63,7 +92,7 @@ export function createApp({ dataDir, examplePath, configExamplePath, publicDir }
         title: req.body?.title,
         createdBy: user.id,
         inviteeIds: req.body?.inviteeIds,
-        knownUserIds: knownIds(),
+        knownUserIds: directoryIds(),
       });
       events.push(event);
       save(events);
@@ -74,7 +103,7 @@ export function createApp({ dataDir, examplePath, configExamplePath, publicDir }
   });
 
   app.get("/api/events/:id", (req, res) => {
-    const user = requireUser(req, res, dataDir, configExamplePath);
+    const user = requireUser(req, res, authCtx);
     if (!user) {
       return;
     }
@@ -95,7 +124,7 @@ export function createApp({ dataDir, examplePath, configExamplePath, publicDir }
   });
 
   app.post("/api/events/:id/slots", (req, res) => {
-    const user = requireUser(req, res, dataDir, configExamplePath);
+    const user = requireUser(req, res, authCtx);
     if (!user) {
       return;
     }
@@ -119,7 +148,7 @@ export function createApp({ dataDir, examplePath, configExamplePath, publicDir }
   });
 
   app.post("/api/events/:id/slots/:slotId/vote", (req, res) => {
-    const user = requireUser(req, res, dataDir, configExamplePath);
+    const user = requireUser(req, res, authCtx);
     if (!user) {
       return;
     }
@@ -143,7 +172,7 @@ export function createApp({ dataDir, examplePath, configExamplePath, publicDir }
   });
 
   app.post("/api/events/:id/lock", (req, res) => {
-    const user = requireUser(req, res, dataDir, configExamplePath);
+    const user = requireUser(req, res, authCtx);
     if (!user) {
       return;
     }

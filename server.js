@@ -12,6 +12,7 @@ const app = createApp({
   examplePath: path.join(root, "data", "events.example.json"),
   configExamplePath: path.join(root, "data", "config.example.json"),
   publicDir: path.join(root, "public"),
+  trustProxyIdentity: process.env.TRUST_PROXY_IDENTITY === "1",
 });
 
 app.listen(port, host, () => {
