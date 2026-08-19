@@ -1,0 +1,11 @@
+{{eventName}} has been cancelled
+
+Hi {{inviteeName}}, {{creatorName}} cancelled this event.
+
+When: {{when}}
+Duration: {{duration}}
+Venue: {{venue}}
+
+{{description}}
+
+Open the calendar: {{appUrl}}

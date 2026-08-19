@@ -1,0 +1,13 @@
+You're invited to {{eventName}}
+
+Hi {{inviteeName}}, {{creatorName}} invited you to this event.
+
+When: {{when}}
+Duration: {{duration}}
+Venue: {{venue}}
+
+{{description}}
+
+Open the calendar: {{appUrl}}
+
+You can accept, suggest times, and vote on slots in the calendar.

@@ -1,0 +1,12 @@
+Calendar activity for {{date}}
+
+{{eventsCreated}} events created
+{{invitesSent}} invitations
+{{slotsAdded}} slots proposed
+{{votes}} votes
+{{accepts}} accepts
+{{confirmed}} events confirmed
+
+{{activityText}}
+
+{{total}} recorded {{activityWord}} in total.

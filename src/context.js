@@ -30,6 +30,70 @@ function header(req, name) {
   return String(headers[name.toLowerCase()] ?? "").trim();
 }
 
+function parseUserinfo(raw) {
+  const value = String(raw ?? "").trim();
+  if (!value) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    try {
+      const parsed = JSON.parse(Buffer.from(value, "base64").toString("utf8"));
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+}
+
+function pictureFrom(value) {
+  const url = String(value ?? "").trim();
+  if (!url || url.length > 500) {
+    return "";
+  }
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? url : "";
+  } catch {
+    return "";
+  }
+}
+
+function splitDisplayName(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length || parts[0].includes("@")) {
+    return { givenName: "", familyName: "" };
+  }
+  if (parts.length === 1) {
+    return { givenName: parts[0], familyName: "" };
+  }
+  return { givenName: parts[0], familyName: parts.slice(1).join(" ") };
+}
+
+function identityUser({ id, name, email, givenName, familyName, picture, login, source }) {
+  const display = String(name || "").trim() || [givenName, familyName].filter(Boolean).join(" ") || email.split("@")[0] || id;
+  const split = splitDisplayName(display);
+  const first = String(givenName || split.givenName || "").trim();
+  const last = String(familyName || split.familyName || "").trim();
+  return {
+    id: String(id),
+    name: display,
+    email: String(email || "").trim().toLowerCase(),
+    givenName: first,
+    familyName: last,
+    firstName: first,
+    lastName: last,
+    picture: pictureFrom(picture),
+    login: String(login || "").trim() || undefined,
+    source,
+  };
+}
+
 export function standaloneConfigFile(dataDir) {
   return path.join(dataDir, "config.json");
 }
@@ -97,12 +161,16 @@ export class StandaloneContext extends BaseContext {
     if (!found) {
       return null;
     }
-    return {
-      id: String(found.id),
-      name: String(found.name),
-      email: String(found.email ?? "").trim().toLowerCase(),
+    return identityUser({
+      id: found.id,
+      name: found.name,
+      email: found.email,
+      givenName: found.givenName ?? found.firstName,
+      familyName: found.familyName ?? found.lastName,
+      picture: found.picture,
+      login: found.login ?? found.preferredUsername ?? found.id,
       source: "test",
-    };
+    });
   }
 }
 
@@ -124,12 +192,28 @@ export class EmbeddedContext extends BaseContext {
   }
 
   user(req) {
-    const email = header(req, "X-Auth-Request-Email").toLowerCase();
+    const userinfo = parseUserinfo(header(req, "X-Auth-Request-Userinfo"));
+    const email = (header(req, "X-Auth-Request-Email") || String(userinfo.email ?? "")).toLowerCase();
     if (!email) {
       return null;
     }
-    const name = header(req, "X-Auth-Request-User") || email.split("@")[0];
-    return { id: email, name, email, source: "portal" };
+    const name = header(req, "X-Auth-Request-User") || String(userinfo.name ?? "") || email.split("@")[0];
+    const givenName =
+      header(req, "X-Auth-Request-Given-Name") || String(userinfo.givenName ?? userinfo.given_name ?? userinfo.firstName ?? "");
+    const familyName =
+      header(req, "X-Auth-Request-Family-Name") || String(userinfo.familyName ?? userinfo.family_name ?? userinfo.lastName ?? "");
+    const picture = header(req, "X-Auth-Request-Picture") || userinfo.picture || userinfo.avatar_url || "";
+    const login = header(req, "X-Auth-Request-Login") || String(userinfo.preferredUsername ?? userinfo.login ?? "");
+    return identityUser({
+      id: email,
+      name,
+      email,
+      givenName,
+      familyName,
+      picture,
+      login,
+      source: "portal",
+    });
   }
 }
 

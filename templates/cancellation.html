@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{subject}}</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f1f3f4;color:#3c4043;font-family:Roboto,Segoe UI,system-ui,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f1f3f4;padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:28px 24px;">
+            <tr>
+              <td>
+                <p style="margin:0 0 8px;color:#d93025;font-size:12px;font-weight:500;letter-spacing:0.04em;text-transform:uppercase;">Event cancelled</p>
+                <h1 style="margin:0 0 16px;font-size:22px;font-weight:500;color:#202124;">{{eventName}} has been cancelled</h1>
+                <p style="margin:0 0 16px;line-height:1.5;">Hi {{inviteeName}}, {{creatorName}} cancelled this event.</p>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 20px;font-size:14px;line-height:1.5;">
+                  <tr>
+                    <td style="padding:4px 0;color:#70757a;width:96px;vertical-align:top;">When</td>
+                    <td style="padding:4px 0;">{{when}}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:4px 0;color:#70757a;vertical-align:top;">Duration</td>
+                    <td style="padding:4px 0;">{{duration}}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:4px 0;color:#70757a;vertical-align:top;">Venue</td>
+                    <td style="padding:4px 0;">{{venue}}</td>
+                  </tr>
+                </table>
+                <p style="margin:0 0 20px;line-height:1.5;white-space:pre-wrap;">{{description}}</p>
+                <p style="margin:0 0 8px;">
+                  <a href="{{appUrl}}" style="display:inline-block;background:#1a73e8;color:#ffffff;text-decoration:none;border-radius:4px;padding:10px 16px;font-size:14px;font-weight:500;">Open calendar</a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

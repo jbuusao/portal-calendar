@@ -6,6 +6,10 @@ Standalone config lives in `data/config.json` (seeded from `data/config.example.
 
 `src/context.js` is the app Context: it knows standalone vs portal-embedded, reads config, and returns the authenticated user (or `null`).
 
+Events have a name, optional description and venue, a default duration of 1 hour, and proposed time slots (`date` + `start`, with `end` derived from duration). Participants are the creator plus invitees. The creator starts as pending until they accept or vote on a slot; invitees stay `invited` until they accept or vote. Creators can delete their events even after others have accepted slots, and can choose whether to send cancellation emails.
+
+Each signed-in user has a private address book (up to `MAX_CONTACTS_ENTRIES`, default 100). A contact has first name, last name, nickname, optional profile picture URL, and up to four emails. Names in the UI use nickname if set, otherwise first and last name from the Context identity (portal headers / userinfo, including `picture` / avatar), and only fall back to email when no name is stored. Event creators invite from that book or by typing an email. When someone uses the app, Context first/last name and avatar are stored and shown on participants, invitations, and the signed-in chip; matching address-book entries are updated with those fields.
+
 This repo is the source of truth. The home portal vendor-copies it into `apps/<slug>` with `portal-import.sh`. Import copies this config into `config/plugins.json` under that slug.
 
 ## Run
@@ -19,6 +23,8 @@ npm test
 `GET /health` returns 200 when ready. Durable writes stay under `./data` (`calendar.sqlite`). Set `CALENDAR_DATA_DIR` to use a different directory — standalone and embedded must not share that path. No TLS and no login page of its own — the portal owns those.
 
 Standalone mode uses `X-Test-User` and a user switcher. Behind the portal, `PORTAL_MODE=embedded` (set by Compose). Context then reads `config/plugins.json[<slug>]` and `X-Auth-Request-Email` / `X-Auth-Request-User`. Event membership stays in this app; who can open the app stays in portal RBAC.
+
+Email is sent over SMTP, defaulting to MailerSend (`smtp.mailersend.net`). Put `MAILERSEND_API_KEY` or `MAILSERSEND_API_KEY` in `.env`. Standalone **simulates** delivery (rendered templates are logged, nothing leaves the machine). Embedded sends for real: SMTP if `SMTP_USER` is set, otherwise MailerSend's email API. Templates live in `templates/` (`invitation`, `cancellation`, and `daily-admin`). The admin digest is an aggregated summary of the previous day's activity, sent to `MAIL_ADMIN` or `adminEmail` in config.
 
 ## Import into the portal
 

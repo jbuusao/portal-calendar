@@ -1,15 +1,18 @@
 [
   {
     "id": "evt-seed-1",
-    "title": "Tennis match",
+    "name": "Tennis match",
+    "description": "Weekly doubles",
+    "venue": "Riverside courts",
+    "durationMinutes": 60,
     "createdBy": "alice",
     "inviteeIds": ["bob", "cara"],
-    "invites": [
-      { "eventId": "evt-seed-1", "userId": "bob", "at": "2026-08-01T10:00:00.000Z" },
-      { "eventId": "evt-seed-1", "userId": "cara", "at": "2026-08-01T10:00:00.000Z" }
+    "invitees": [
+      { "userId": "bob", "status": "invited", "at": "2026-08-01T10:00:00.000Z", "notifiedAt": "2026-08-01T10:00:00.000Z" },
+      { "userId": "cara", "status": "accepted", "at": "2026-08-01T10:00:00.000Z", "notifiedAt": "2026-08-01T10:00:00.000Z" }
     ],
-    "status": "open",
-    "finalSlotId": null,
+    "status": "proposed",
+    "confirmedSlotId": null,
     "slots": [
       { "id": "s1", "date": "2026-08-20", "start": "18:00", "suggestedBy": "bob" }
     ],

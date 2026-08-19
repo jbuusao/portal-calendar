@@ -41,7 +41,12 @@ describe("StandaloneContext", () => {
     assert.equal(ctx.mode, "standalone");
     assert.equal(ctx.get("theme"), "dark");
     assert.equal(ctx.user({ get: () => "" }), null);
-    assert.equal(ctx.user({ get: (name) => (name === "X-Test-User" ? "alice" : "") }).id, "alice");
+    assert.equal(
+      ctx.user({
+        get: (name) => (name === "X-Test-User" ? "alice" : ""),
+      }).givenName,
+      "Alice",
+    );
     assert.equal(ctx.user({ get: (name) => (name === "X-Test-User" ? "nope" : "") }), null);
   });
 });
@@ -75,12 +80,46 @@ describe("EmbeddedContext", () => {
     assert.equal(ctx.slug, "calendar");
     assert.equal(ctx.get("timezone"), "Europe/London");
     assert.equal(ctx.user({ get: () => "" }), null);
-    assert.equal(
-      ctx.user({
-        get: (name) => (name === "X-Auth-Request-Email" ? "ada@example.com" : name === "X-Auth-Request-User" ? "Ada" : ""),
-      }).id,
-      "ada@example.com",
-    );
+    const ada = ctx.user({
+      get: (name) =>
+        ({
+          "X-Auth-Request-Email": "ada@example.com",
+          "X-Auth-Request-User": "Ada Lovelace",
+          "X-Auth-Request-Given-Name": "Ada",
+          "X-Auth-Request-Family-Name": "Lovelace",
+          "X-Auth-Request-Picture": "https://example.com/ada.png",
+          "X-Auth-Request-Login": "ada",
+        })[name] || "",
+    });
+    assert.deepEqual(ada, {
+      id: "ada@example.com",
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      givenName: "Ada",
+      familyName: "Lovelace",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      picture: "https://example.com/ada.png",
+      login: "ada",
+      source: "portal",
+    });
+    const packed = Buffer.from(
+      JSON.stringify({
+        email: "ada@example.com",
+        name: "Ada Lovelace",
+        givenName: "Ada",
+        familyName: "Lovelace",
+        picture: "https://example.com/ada.png",
+        preferredUsername: "ada",
+      }),
+      "utf8",
+    ).toString("base64");
+    const fromJson = ctx.user({
+      get: (name) => (name === "X-Auth-Request-Userinfo" ? packed : ""),
+    });
+    assert.equal(fromJson.givenName, "Ada");
+    assert.equal(fromJson.familyName, "Lovelace");
+    assert.equal(fromJson.picture, "https://example.com/ada.png");
     assert.equal(ctx.user({ get: (name) => (name === "X-Test-User" ? "alice" : "") }), null);
   });
 });

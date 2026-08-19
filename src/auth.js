@@ -1,3 +1,5 @@
+import { parseDisplayName } from "./contacts.js";
+
 export function usersFromConfig(config) {
   if (!Array.isArray(config?.users)) {
     throw new Error("config.users must be an array");
@@ -12,7 +14,15 @@ export function usersFromConfig(config) {
     if (!id || !name) {
       throw new Error(`users[${index}] needs id and name`);
     }
-    return { id, name, email };
+    const split = parseDisplayName(name);
+    return {
+      id,
+      name,
+      email,
+      firstName: String(item.givenName ?? item.firstName ?? split.firstName).trim(),
+      lastName: String(item.familyName ?? item.lastName ?? split.lastName).trim(),
+      picture: String(item.picture ?? "").trim(),
+    };
   });
 }
 
@@ -26,5 +36,17 @@ export function requireUser(req, res, context) {
 }
 
 export function publicUser(user) {
-  return { id: user.id, name: user.name, email: user.email };
+  const firstName = user.firstName || user.givenName || "";
+  const lastName = user.lastName || user.familyName || "";
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    givenName: user.givenName || firstName,
+    familyName: user.familyName || lastName,
+    firstName,
+    lastName,
+    picture: user.picture || "",
+    login: user.login || "",
+  };
 }
