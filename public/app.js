@@ -532,7 +532,7 @@ async function api(path, opts = {}) {
   if (opts.body && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(path, { ...opts, headers });
+  const res = await fetch(new URL(path, `${location.origin}/`).toString(), { ...opts, headers });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.error || `Request failed (${res.status})`);
@@ -1170,6 +1170,7 @@ function renderCalendar() {
   renderEventDetail();
   renderGrid();
   updateLockButton();
+  syncEventUrl();
 }
 
 function closeViewMenu() {
@@ -1397,17 +1398,71 @@ function selectDate(iso, { goToMonth = false } = {}) {
   renderCalendar();
 }
 
-function selectEvent(id) {
+function eventIdFromLocation() {
+  const match = String(location.pathname || "").match(/^\/events\/([^/]+)\/?$/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function eventPath(id) {
+  return id ? `/events/${encodeURIComponent(id)}` : "/";
+}
+
+let keepEventPath = "";
+
+function syncEventUrl() {
+  const next = currentEvent ? eventPath(currentEvent.id) : keepEventPath ? eventPath(keepEventPath) : "/";
+  if (location.pathname !== next) {
+    history.replaceState(null, "", next);
+  }
+}
+
+function showEvent(id, { reveal = false } = {}) {
   const event = events.find((item) => item.id === id) ?? null;
   currentEvent = event;
-  selectedSlotId = event?.confirmedSlotId ?? selectedSlotId;
-  if (event && !event.slots.some((slot) => slot.id === selectedSlotId)) {
+  if (!event) {
+    return false;
+  }
+  keepEventPath = "";
+  selectedSlotId = event.confirmedSlotId ?? selectedSlotId;
+  if (!event.slots.some((slot) => slot.id === selectedSlotId)) {
     selectedSlotId = visibleSlots(event)[0]?.id ?? null;
   }
-  if (isNarrow()) {
-    openSidebar();
+  if (reveal) {
+    const slot = event.slots.find((item) => item.id === selectedSlotId) ?? visibleSlots(event)[0];
+    if (slot?.date) {
+      selectedDate = slot.date;
+      const date = parseIsoDate(slot.date);
+      viewYear = date.getFullYear();
+      viewMonth = date.getMonth();
+    }
+    if (isNarrow()) {
+      openSidebar();
+    }
   }
+  return true;
+}
+
+function selectEvent(id) {
+  showEvent(id, { reveal: true });
   renderCalendar();
+}
+
+function applyEventFromLocation() {
+  const pathId = eventIdFromLocation();
+  if (!pathId) {
+    keepEventPath = "";
+    if (currentEvent) {
+      currentEvent = events.find((item) => item.id === currentEvent.id) ?? null;
+    }
+    return;
+  }
+  if (showEvent(pathId, { reveal: true })) {
+    showError("");
+    return;
+  }
+  currentEvent = null;
+  keepEventPath = pathId;
+  showError("event not found");
 }
 
 function replaceEvent(updated) {
@@ -1436,9 +1491,7 @@ function goToToday({ pulse = false } = {}) {
 async function loadCalendar() {
   const data = await api("./api/events");
   events = data.events ?? [];
-  if (currentEvent) {
-    currentEvent = events.find((item) => item.id === currentEvent.id) ?? null;
-  }
+  applyEventFromLocation();
   await loadContacts();
   renderCalendar();
 }
@@ -2031,6 +2084,10 @@ try {
 
 fillStartOptions();
 updateEndField();
+window.addEventListener("popstate", () => {
+  applyEventFromLocation();
+  renderCalendar();
+});
 window.addEventListener("resize", () => {
   if (!isNarrow()) {
     closeSidebar();

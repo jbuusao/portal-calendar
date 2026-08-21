@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import { createApp } from "../src/app.js";
 import { createContext } from "../src/context.js";
 import { aggregateActivity, formatActivityText } from "../src/activity.js";
-import { mailerSendApiKey, renderTemplate, smtpConfig } from "../src/mail.js";
+import { eventPageUrl } from "../src/invite.js";
+import { mailerSendApiKey, mailDeliveryMessage, renderTemplate, smtpConfig } from "../src/mail.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const examplePath = path.join(root, "data", "events.example.json");
@@ -42,6 +43,19 @@ describe("mail templates and MailerSend config", () => {
       eventName: "Tennis match",
     });
     assert.equal(text, "Hi Bob, join Tennis match");
+  });
+
+  it("builds an event page URL from APP_URL and the event id", () => {
+    assert.equal(eventPageUrl("https://buusao.com", "a1b2c3d4"), "https://buusao.com/events/a1b2c3d4");
+    assert.equal(eventPageUrl("https://buusao.com/", "a1b2c3d4"), "https://buusao.com/events/a1b2c3d4");
+    assert.equal(eventPageUrl("/", "a1b2c3d4"), "/events/a1b2c3d4");
+  });
+
+  it("maps MailerSend trial recipient limits to a clear message", () => {
+    assert.match(
+      mailDeliveryMessage(new Error('MailerSend rejected the message (422): {"message":"You have reached trial account unique recipients limit. #MS42225"}')),
+      /2 unique addresses/,
+    );
   });
 });
 
@@ -90,6 +104,8 @@ describe("simulated mail in standalone", { concurrency: false }, () => {
     assert.match(invites[0].subject, /Mail picnic/);
     assert.match(invites[0].text, /Park/);
     assert.match(invites[0].html, /Mail picnic/);
+    assert.match(invites[0].text, new RegExp(`/events/${event.id}`));
+    assert.match(invites[0].html, new RegExp(`/events/${event.id}`));
   });
 
   it("addresses the invitee by first name in invitation email", async () => {
@@ -269,5 +285,82 @@ describe("embedded MailerSend API delivery", { concurrency: false }, () => {
     assert.equal(body.to[0].email, "bob@example.com");
     assert.match(body.subject, /Portal picnic/);
     assert.match(posted[0].init.headers.Authorization, /mlsn\.test-key/);
+  });
+});
+
+describe("embedded MailerSend failures surface to the client", { concurrency: false }, () => {
+  let dataDir;
+  let server;
+  let app;
+  let base;
+
+  before(async () => {
+    dataDir = await mkdtemp(path.join(os.tmpdir(), "calendar-mail-fail-"));
+    const { createMailer } = await import("../src/mail.js");
+    const mailer = createMailer({
+      env: {
+        MAILSERSEND_API_KEY: "mlsn.test-key",
+        MAIL_FROM: "calendar@example.com",
+      },
+      standalone: false,
+      templatesDir,
+      fetchImpl: async () => ({
+        ok: false,
+        status: 422,
+        text: async () => '{"message":"You have reached trial account unique recipients limit. #MS42225"}',
+      }),
+    });
+    app = createApp({
+      dataDir,
+      examplePath,
+      publicDir,
+      templatesDir,
+      mailer,
+      context: createContext({ mode: "embedded", slug: "calendar", config: { adminEmail: "ada@example.com" } }),
+    });
+    server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    const { port } = server.address();
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  after(async () => {
+    app?.locals?.stopMailJobs?.();
+    await new Promise((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+    app?.locals?.db?.close();
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it("returns 502 instead of pretending invitations were sent", async () => {
+    const created = await fetch(`${base}/api/events`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Auth-Request-Email": "ada@example.com",
+        "X-Auth-Request-User": "Ada",
+      },
+      body: JSON.stringify({ name: "Blocked picnic", inviteeIds: ["bob@example.com"] }),
+    });
+    const { event } = await created.json();
+    const sent = await fetch(`${base}/api/events/${event.id}/invitations`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Auth-Request-Email": "ada@example.com",
+        "X-Auth-Request-User": "Ada",
+      },
+      body: "{}",
+    });
+    assert.equal(sent.status, 502);
+    const body = await sent.json();
+    assert.match(body.error, /2 unique addresses/);
+    assert.equal(body.sent, 0);
+    const listed = await fetch(`${base}/api/events/${event.id}`, {
+      headers: { "X-Auth-Request-Email": "ada@example.com" },
+    });
+    const after = await listed.json();
+    assert.equal(after.event.participants.find((item) => item.userId === "bob@example.com").notifiedAt, "");
   });
 });

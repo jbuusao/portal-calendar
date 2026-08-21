@@ -118,6 +118,15 @@ describe("calendar app", { concurrency: false }, () => {
     assert.equal(event.invites.length, 1);
     assert.equal(event.invites[0].userId, "bob");
     assert.ok(event.invites[0].at);
+    assert.match(event.id, /^[0-9a-f]{8}$/);
+
+    const page = await fetch(`${base}/events/${event.id}`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /<div class="app"/);
+
+    const missingPage = await fetch(`${base}/events/zzzzzzzz`);
+    assert.equal(missingPage.status, 200);
+    assert.match(await missingPage.text(), /<div class="app"/);
 
     const asBob = await fetch(`${base}/api/events`, asUser("bob"));
     const bobBody = await asBob.json();

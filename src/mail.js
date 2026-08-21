@@ -29,6 +29,17 @@ export function mailFrom(env = process.env) {
   return { email: email || "calendar@localhost", name };
 }
 
+export function mailDeliveryMessage(err) {
+  const message = err instanceof Error ? err.message : String(err ?? "").trim();
+  if (/MS42225|unique recipients limit/i.test(message)) {
+    return "MailerSend’s trial domain can only email 2 unique addresses. Upgrade the plan and send from your own domain, or invite someone already emailed on this trial.";
+  }
+  if (/MS42222/i.test(message)) {
+    return "MailerSend trial sending limit reached. Upgrade the plan or wait for the quota to reset.";
+  }
+  return message || "Email was not sent.";
+}
+
 export function renderTemplate(source, vars = {}) {
   return String(source).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
     const value = vars[key];

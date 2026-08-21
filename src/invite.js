@@ -1,6 +1,15 @@
 import { slotEnd } from "./events.js";
 import { correspondenceName, greetingName } from "./names.js";
 
+export function eventPageUrl(appUrl, eventId) {
+  const base = String(appUrl || "").trim().replace(/\/+$/, "");
+  const id = encodeURIComponent(String(eventId || "").trim());
+  if (!id) {
+    return base || "/";
+  }
+  return `${base}/events/${id}`;
+}
+
 /** Record-only invite rows. Email delivery is handled by the mailer (simulated in standalone). */
 export function simulateInvites(eventId, inviteeIds) {
   const at = new Date().toISOString();

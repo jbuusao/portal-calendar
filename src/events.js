@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { simulateInvites } from "./invite.js";
@@ -13,6 +14,10 @@ export function isEmail(value) {
 
 export function eventsFile(dataDir) {
   return path.join(dataDir, "events.json");
+}
+
+export function newEventId() {
+  return randomBytes(4).toString("hex");
 }
 
 function needsExampleSeed(raw) {
@@ -429,6 +434,16 @@ export function loadEvent(db, id) {
   return row ? rowToEvent(db, row) : null;
 }
 
+export function allocateEventId(db) {
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const id = newEventId();
+    if (!loadEvent(db, id)) {
+      return id;
+    }
+  }
+  throw new Error("could not allocate event id");
+}
+
 export function saveEvent(db, event) {
   const item = serializeEvent(event);
   const persist = db.transaction((record) => {
@@ -519,6 +534,7 @@ export function eventsForUser(events, userOrId) {
 }
 
 export function createEvent({
+  id,
   title,
   name,
   description,
@@ -536,7 +552,7 @@ export function createEvent({
   if (!trimmed) {
     throw new Error("name is required");
   }
-  const id = `evt-${Date.now()}`;
+  const eventId = String(id ?? "").trim() || newEventId();
   const invitees = [...new Set((inviteeIds ?? []).map((item) => String(item).trim().toLowerCase()))]
     .filter((userId) => userId && userId !== createdBy)
     .filter((userId) => allowedInvitee(userId, knownUserIds))
@@ -551,7 +567,7 @@ export function createEvent({
     }
   }
   const event = serializeEvent({
-    id,
+    id: eventId,
     name: trimmed,
     description: String(description ?? "").trim(),
     venue: String(venue ?? "").trim(),

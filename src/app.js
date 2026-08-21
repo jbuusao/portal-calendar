@@ -7,6 +7,7 @@ import { openDatabase } from "./db.js";
 import {
   addSlot,
   addInvitees,
+  allocateEventId,
   createEvent,
   deleteSlot,
   deleteStoredEvent,
@@ -41,8 +42,8 @@ import {
   findIdentity,
   updateContact,
 } from "./contacts.js";
-import { sendEventCancellations, sendEventInvitations } from "./invite.js";
-import { createMailer, defaultTemplatesDir } from "./mail.js";
+import { sendEventCancellations, sendEventInvitations, eventPageUrl } from "./invite.js";
+import { createMailer, defaultTemplatesDir, mailDeliveryMessage } from "./mail.js";
 import { correspondenceName } from "./names.js";
 
 function httpError(err, fallback = 400) {
@@ -340,6 +341,7 @@ export function createApp({
     }
     try {
       const event = createEvent({
+        id: allocateEventId(db),
         name: req.body?.name,
         title: req.body?.title,
         description: req.body?.description,
@@ -499,7 +501,7 @@ export function createApp({
           event,
           creator: user,
           invitees: list.map((item) => ({ ...personById(item.userId, event.createdBy), userId: item.userId })),
-          appUrl,
+          appUrl: eventPageUrl(appUrl, event.id),
           update: isUpdate,
         });
         for (const item of sent) {
@@ -515,16 +517,27 @@ export function createApp({
           });
         }
       };
+      let mailError = null;
       try {
         await deliver(pending, false);
         await deliver(previously, true);
       } catch (err) {
+        mailError = err;
         console.error("invitation email failed:", err instanceof Error ? err.message : err);
       }
       if (sentIds.length) {
         markInviteesNotified(event, sentIds);
       }
-      res.json({ event: withPeopleNames(saveEvent(db, event), user.id), sent: sentIds.length, update });
+      const saved = withPeopleNames(saveEvent(db, event), user.id);
+      if (mailError || !sentIds.length) {
+        const detail = mailError
+          ? mailDeliveryMessage(mailError)
+          : "No invitation email was sent. Check mail configuration and that each invitee has an email address.";
+        const extra = sentIds.length ? ` ${sentIds.length} invitation(s) were sent before the error.` : "";
+        res.status(502).json({ error: `${detail}${extra}`, event: saved, sent: sentIds.length, update });
+        return;
+      }
+      res.json({ event: saved, sent: sentIds.length, update });
     } catch (err) {
       res.status(httpError(err)).json({ error: err instanceof Error ? err.message : "could not send invitations" });
     }
@@ -716,6 +729,14 @@ export function createApp({
           }
         } catch (err) {
           console.error("cancellation email failed:", err instanceof Error ? err.message : err);
+          res.status(502).json({ error: mailDeliveryMessage(err) });
+          return;
+        }
+        if (recipients.length && !sent) {
+          res.status(502).json({
+            error: "Cancellation email was not sent. Check mail configuration, or delete without sending emails.",
+          });
+          return;
         }
       }
       deleteStoredEvent(db, event, { userId: user.id });
@@ -732,7 +753,7 @@ export function createApp({
   });
 
   app.use(express.static(publicDir));
-  app.get("/", (_req, res) => {
+  app.get(["/", "/events/:id"], (_req, res) => {
     res.sendFile(path.join(publicDir, "index.html"));
   });
 
